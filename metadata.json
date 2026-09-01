@@ -1,0 +1,6 @@
+{
+  "name": "Berean: Bilingual Study Bible & Devotional Guide",
+  "description": "Comprehensive English & Amharic Study Bible with daily devotional reading plans, custom progress tracking, reflection journal, multi-device cloud sync, offline reader, and automated Discord daily verse bot integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
