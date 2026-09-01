@@ -115,6 +115,13 @@ export interface AudioPlaybackState {
   currentBookId?: string;
   currentChapter?: number;
   error: string | null;
+  /** When on, the current chapter/playlist restarts from the beginning
+   *  instead of stopping when it finishes -- pairs with the sleep timer
+   *  for "loop this chapter until I fall asleep" use. */
+  repeatMode: boolean;
+  /** Wall-clock timestamp (ms) the sleep timer will fire at, or null if
+   *  none is set. Counts down in real time regardless of pause state. */
+  sleepTimerEndsAt: number | null;
 }
 
 type StateListener = (state: AudioPlaybackState) => void;
@@ -130,6 +137,7 @@ class AudioReaderService {
   private isParallelPhaseTwo: boolean = false; // in parallel mode, phase 1 is EN, phase 2 is AM
   private verseTimings: VerseTiming[] = [];
   private pendingSeekVerseIndex: number | null = null;
+  private sleepTimerId: ReturnType<typeof setTimeout> | null = null;
 
   private state: AudioPlaybackState = {
     isPlaying: false,
@@ -152,6 +160,8 @@ class AudioReaderService {
     audioSourceUrl: null,
     isWordProjectAudio: false,
     error: null,
+    repeatMode: false,
+    sleepTimerEndsAt: null,
   };
 
   constructor() {
@@ -255,6 +265,49 @@ class AudioReaderService {
   public setLangMode(mode: AudioLangMode) {
     this.state.langMode = mode;
     this.notify();
+  }
+
+  public setRepeatMode(on: boolean) {
+    this.state.repeatMode = on;
+    this.notify();
+  }
+
+  public toggleRepeat() {
+    this.setRepeatMode(!this.state.repeatMode);
+  }
+
+  /** Set (or clear, with null/0) a sleep timer: playback pauses -- not
+   *  resets -- after `minutes` of real time, regardless of pause/resume
+   *  in between. Setting a new value replaces any timer already running. */
+  public setSleepTimer(minutes: number | null) {
+    if (this.sleepTimerId) {
+      clearTimeout(this.sleepTimerId);
+      this.sleepTimerId = null;
+    }
+    if (!minutes || minutes <= 0) {
+      this.state.sleepTimerEndsAt = null;
+      this.notify();
+      return;
+    }
+    const ms = minutes * 60_000;
+    this.state.sleepTimerEndsAt = Date.now() + ms;
+    this.notify();
+    this.sleepTimerId = setTimeout(() => {
+      this.sleepTimerId = null;
+      this.state.sleepTimerEndsAt = null;
+      this.pause();
+      this.notify();
+    }, ms);
+  }
+
+  public clearSleepTimer() {
+    this.setSleepTimer(null);
+  }
+
+  /** Add more time to whatever sleep timer (if any) is already running. */
+  public extendSleepTimer(additionalMinutes: number) {
+    const remainingMs = this.state.sleepTimerEndsAt ? Math.max(0, this.state.sleepTimerEndsAt - Date.now()) : 0;
+    this.setSleepTimer(remainingMs / 60_000 + additionalMinutes);
   }
 
   public setEngine(engine: AudioEngineType) {
@@ -780,6 +833,19 @@ class AudioReaderService {
   private handleTrackEnded() {
     if (this.state.isWordProjectAudio) {
       // WordProject chapter audio ended
+      if (this.state.repeatMode && this.audioElement) {
+        this.audioElement.currentTime = 0;
+        this.audioElement.play().catch(() => {});
+        this.state.isPlaying = true;
+        this.state.isPaused = false;
+        this.state.currentTime = 0;
+        this.currentPlaylistIndex = 0;
+        this.state.currentVerseIndex = 0;
+        this.state.currentVerse = this.playlist[0] || null;
+        this.state.currentVerseId = this.playlist[0]?.id || null;
+        this.notify();
+        return;
+      }
       this.state.isPlaying = false;
       this.state.isPaused = false;
       this.state.currentTime = this.state.duration;
@@ -800,6 +866,10 @@ class AudioReaderService {
     // Advance to next verse in playlist
     if (this.currentPlaylistIndex < this.playlist.length - 1) {
       this.currentPlaylistIndex++;
+      this.playCurrentQueueItem();
+    } else if (this.state.repeatMode && this.playlist.length > 0) {
+      // End of playlist, but repeat is on -- start over
+      this.currentPlaylistIndex = 0;
       this.playCurrentQueueItem();
     } else {
       // End of playlist

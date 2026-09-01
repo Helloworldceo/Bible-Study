@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Play, Pause, Square, SkipForward, SkipBack, Volume2, VolumeX, 
-  Sparkles, Globe, Settings, ChevronDown, Music, 
-  Radio, RotateCcw, RotateCw, Mic
+import {
+  Play, Pause, Square, SkipForward, SkipBack, Volume2, VolumeX,
+  Sparkles, Globe, Settings, ChevronDown, Music,
+  Radio, RotateCcw, RotateCw, Mic, Repeat, Moon, X as XIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -38,6 +38,18 @@ export const AudioPlayerBar: React.FC<AudioPlayerBarProps> = ({ appLang }) => {
       unsubscribe();
     };
   }, []);
+
+  // Sleep timer countdown display -- ticks once a second only while a timer
+  // is actually running, independent of playback's own (pause-sensitive)
+  // update cycle, since the timer itself counts down in real wall-clock
+  // time regardless of pause state.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!playbackState.sleepTimerEndsAt) return;
+    setNow(Date.now()); // avoid showing a stale reading from before the timer started
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [playbackState.sleepTimerEndsAt]);
 
   if (!playbackState.isPlaying && !playbackState.isPaused && !playbackState.isLoading) {
     return null;
@@ -86,6 +98,25 @@ export const AudioPlayerBar: React.FC<AudioPlayerBarProps> = ({ appLang }) => {
       setIsMuted(true);
     }
   };
+
+  const handleToggleRepeat = () => {
+    audioReader.toggleRepeat();
+  };
+
+  const handleSetSleepTimer = (minutes: number) => {
+    audioReader.setSleepTimer(minutes);
+  };
+
+  const handleCancelSleepTimer = () => {
+    audioReader.clearSleepTimer();
+  };
+
+  const sleepSecondsLeft = playbackState.sleepTimerEndsAt
+    ? Math.max(0, Math.floor((playbackState.sleepTimerEndsAt - now) / 1000))
+    : null;
+  const sleepTimeLabel = sleepSecondsLeft !== null
+    ? `${Math.floor(sleepSecondsLeft / 60)}:${(sleepSecondsLeft % 60).toString().padStart(2, '0')}`
+    : null;
 
   const currentVoiceObj = AI_VOICES.find(v => v.id === playbackState.selectedVoiceId) || AI_VOICES[0];
   const progressPercent = playbackState.duration > 0 
@@ -300,6 +331,31 @@ export const AudioPlayerBar: React.FC<AudioPlayerBarProps> = ({ appLang }) => {
               <Square className="w-4 h-4" />
             </button>
 
+            {/* Repeat Toggle */}
+            <button
+              onClick={handleToggleRepeat}
+              className={`p-2 rounded-xl border transition-colors ${
+                playbackState.repeatMode
+                  ? 'bg-amber-500/20 border-amber-500/50 text-amber-300'
+                  : 'bg-transparent border-transparent hover:bg-stone-800 text-stone-400 hover:text-stone-200'
+              }`}
+              title={playbackState.repeatMode ? 'Repeat: On (loops this chapter)' : 'Repeat: Off'}
+            >
+              <Repeat className="w-4 h-4" />
+            </button>
+
+            {/* Sleep Timer badge (only when active) -- opens settings to manage it */}
+            {sleepTimeLabel && (
+              <button
+                onClick={() => setIsExpanded(true)}
+                className="hidden sm:flex items-center gap-1 px-2 py-1.5 rounded-xl bg-indigo-500/15 border border-indigo-400/40 text-indigo-300 text-[11px] font-mono font-semibold transition-colors hover:bg-indigo-500/25"
+                title="Sleep timer active -- click to manage"
+              >
+                <Moon className="w-3.5 h-3.5" />
+                {sleepTimeLabel}
+              </button>
+            )}
+
             {/* Expand / Settings Toggle */}
             <button
               onClick={() => setIsExpanded(!isExpanded)}
@@ -499,6 +555,51 @@ export const AudioPlayerBar: React.FC<AudioPlayerBarProps> = ({ appLang }) => {
                     className="w-20 accent-amber-500 cursor-pointer h-1.5 bg-stone-800 rounded-lg"
                   />
                 </div>
+              </div>
+
+              {/* Sleep Timer -- stop playback automatically after N minutes,
+                  regardless of pause/resume in between. Pairs with Repeat
+                  above for "loop this chapter until I fall asleep." */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-stone-800/60">
+                <span className="text-stone-400 flex items-center gap-1.5 font-medium shrink-0">
+                  <Moon className="w-3.5 h-3.5 text-indigo-400" />
+                  {appLang === 'am' ? 'የመተኛ ሰዓት ቆጣሪ' : appLang === 'fr' ? 'Minuterie de sommeil' : 'Sleep Timer'}:
+                </span>
+
+                {sleepTimeLabel ? (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="px-2.5 py-1 rounded-lg bg-indigo-500/15 border border-indigo-400/40 text-indigo-300 font-mono font-semibold text-xs">
+                      {appLang === 'am' ? `${sleepTimeLabel} ቀርቷል` : appLang === 'fr' ? `${sleepTimeLabel} restant` : `${sleepTimeLabel} left`}
+                    </span>
+                    <button
+                      onClick={() => audioReader.extendSleepTimer(10)}
+                      className="px-2 py-1 rounded-lg text-[11px] font-semibold bg-stone-900 text-stone-300 hover:text-stone-100 border border-stone-800 transition-colors"
+                      title={appLang === 'am' ? '10 ደቂቃ ጨምር' : 'Add 10 more minutes'}
+                    >
+                      +10 {appLang === 'am' ? 'ደቂ' : 'min'}
+                    </button>
+                    <button
+                      onClick={handleCancelSleepTimer}
+                      className="p-1.5 rounded-lg bg-stone-900 text-stone-400 hover:text-rose-300 border border-stone-800 transition-colors"
+                      title={appLang === 'am' ? 'ሰርዝ' : 'Cancel timer'}
+                    >
+                      <XIcon className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1 bg-stone-900 p-1 rounded-xl border border-stone-800 flex-wrap">
+                    {[5, 15, 30, 45, 60].map((mins) => (
+                      <button
+                        key={mins}
+                        onClick={() => handleSetSleepTimer(mins)}
+                        className="px-2.5 py-1 rounded-lg text-[11px] font-semibold text-stone-400 hover:text-stone-100 hover:bg-stone-800 transition-all"
+                        title={`${appLang === 'am' ? 'ካሁን ጀምሮ' : 'Stop playback after'} ${mins} ${appLang === 'am' ? 'ደቂቃ' : 'min'}`}
+                      >
+                        {mins}{appLang === 'am' ? 'ደ' : 'm'}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* WordProject attribution banner */}
