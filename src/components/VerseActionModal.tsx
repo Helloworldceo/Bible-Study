@@ -72,6 +72,15 @@ export const VerseActionModal: React.FC<VerseActionModalProps> = ({
     audioReader.playVerse(verse, mode);
   };
 
+  const handlePlayChapterFromHere = () => {
+    onClose();
+    if (verse.bookId && verse.chapter) {
+      const bookNum = verse.chapter;
+      // Seek or play chapter
+      audioReader.seekToVerse(verse.id);
+    }
+  };
+
   const fetchAIExplanation = async () => {
     setIsExplaining(true);
     try {
@@ -304,6 +313,14 @@ export const VerseActionModal: React.FC<VerseActionModalProps> = ({
                     <span>Parallel</span>
                   </button>
                 </div>
+
+                <button
+                  onClick={handlePlayChapterFromHere}
+                  className="w-full py-2 px-3 rounded-xl bg-amber-100 dark:bg-amber-950/40 hover:bg-amber-200 dark:hover:bg-amber-900/60 text-amber-900 dark:text-amber-200 text-xs font-semibold flex items-center justify-center gap-2 transition-colors border border-amber-300 dark:border-amber-800"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current" />
+                  <span>{lang === 'am' ? `ከቁጥር ${verse.verse} ጀምሮ ሙሉ ምዕራፉን አድምጥ (Continuous Audio)` : `Play chapter starting from verse ${verse.verse}`}</span>
+                </button>
               </div>
 
               {/* Copy Format Options */}

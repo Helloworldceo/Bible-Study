@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Play, Pause, Square, SkipForward, SkipBack, Volume2, VolumeX, 
-  Sparkles, Globe, Settings, ChevronUp, ChevronDown, X, Music, 
-  Cpu, Radio, Layers
+  Sparkles, Globe, Settings, ChevronDown, Music, 
+  Radio, RotateCcw, RotateCw, Mic
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -15,11 +15,17 @@ interface AudioPlayerBarProps {
   appLang: Language;
 }
 
+function formatAudioTime(seconds: number): string {
+  if (!seconds || isNaN(seconds) || !isFinite(seconds)) return '0:00';
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+}
+
 export const AudioPlayerBar: React.FC<AudioPlayerBarProps> = ({ appLang }) => {
   const t = useTranslation(appLang);
   const [playbackState, setPlaybackState] = useState<AudioPlaybackState>(audioReader.getState());
   const [isExpanded, setIsExpanded] = useState(false);
-  const [browserVoices, setBrowserVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [isMuted, setIsMuted] = useState(false);
   const [prevVolume, setPrevVolume] = useState(1.0);
 
@@ -27,15 +33,6 @@ export const AudioPlayerBar: React.FC<AudioPlayerBarProps> = ({ appLang }) => {
     const unsubscribe = audioReader.subscribe((newState) => {
       setPlaybackState(newState);
     });
-
-    // Populate browser voices
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      const updateVoices = () => {
-        setBrowserVoices(audioReader.getBrowserVoices());
-      };
-      updateVoices();
-      window.speechSynthesis.onvoiceschanged = updateVoices;
-    }
 
     return () => {
       unsubscribe();
@@ -74,6 +71,11 @@ export const AudioPlayerBar: React.FC<AudioPlayerBarProps> = ({ appLang }) => {
     audioReader.setEngine(engine);
   };
 
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const target = parseFloat(e.target.value);
+    audioReader.seekTo(target);
+  };
+
   const handleToggleMute = () => {
     if (isMuted) {
       audioReader.setVolume(prevVolume);
@@ -86,6 +88,11 @@ export const AudioPlayerBar: React.FC<AudioPlayerBarProps> = ({ appLang }) => {
   };
 
   const currentVoiceObj = AI_VOICES.find(v => v.id === playbackState.selectedVoiceId) || AI_VOICES[0];
+  const progressPercent = playbackState.duration > 0 
+    ? (playbackState.currentTime / playbackState.duration) * 100 
+    : (playbackState.totalVerses > 0 
+        ? ((playbackState.currentVerseIndex + 1) / playbackState.totalVerses) * 100 
+        : 0);
 
   return (
     <AnimatePresence>
@@ -94,34 +101,40 @@ export const AudioPlayerBar: React.FC<AudioPlayerBarProps> = ({ appLang }) => {
         animate={{ y: 0, opacity: 1 }}
         exit={{ y: 100, opacity: 0 }}
         transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-        className="fixed bottom-3 left-3 right-3 sm:left-6 sm:right-6 md:left-auto md:right-8 md:w-[38rem] z-50 rounded-2xl bg-stone-900/95 text-stone-100 backdrop-blur-xl border border-amber-500/30 shadow-2xl overflow-hidden"
+        className="fixed bottom-3 left-3 right-3 sm:left-6 sm:right-6 md:left-auto md:right-8 md:w-[40rem] z-50 rounded-2xl bg-stone-900/95 text-stone-100 backdrop-blur-xl border border-amber-500/30 shadow-2xl overflow-hidden"
       >
-        {/* Subtle Top Glowing Progress / Active Indicator */}
-        <div className="h-1 w-full bg-stone-800 relative overflow-hidden">
-          {playbackState.isLoading ? (
+        {/* Interactive Scrubbing Progress Bar / Timeline */}
+        <div className="relative group bg-stone-800 h-1.5 hover:h-2.5 transition-all cursor-pointer">
+          <input
+            type="range"
+            min="0"
+            max={playbackState.duration || 100}
+            step="0.1"
+            value={playbackState.currentTime || 0}
+            onChange={handleSeek}
+            disabled={!playbackState.duration || playbackState.duration === 0}
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+            title="Seek Audio Position"
+          />
+          <div 
+            className="h-full bg-gradient-to-r from-amber-500 via-amber-400 to-amber-300 transition-all duration-150"
+            style={{ width: `${Math.min(100, Math.max(0, progressPercent))}%` }}
+          />
+          {playbackState.isLoading && (
             <motion.div 
-              className="h-full bg-amber-500 w-1/3 rounded-full"
+              className="absolute top-0 bottom-0 bg-white/40 w-1/3 rounded-full"
               animate={{ x: ['-100%', '300%'] }}
               transition={{ repeat: Infinity, duration: 1.2, ease: 'linear' }}
             />
-          ) : playbackState.isPlaying ? (
-            <div 
-              className="h-full bg-gradient-to-r from-amber-500 to-amber-300 transition-all duration-300"
-              style={{ 
-                width: playbackState.totalVerses > 0 
-                  ? `${((playbackState.currentVerseIndex + 1) / playbackState.totalVerses) * 100}%`
-                  : '100%' 
-              }}
-            />
-          ) : null}
+          )}
         </div>
 
         {/* Main Compact Player Bar */}
         <div className="p-3.5 sm:p-4 flex items-center justify-between gap-3">
           
-          {/* Left: Animated Soundwave + Verse Title + Subtitle */}
+          {/* Left: Animated Soundwave + Track Title + Time Status */}
           <div className="flex items-center gap-3 min-w-0 flex-1">
-            <div className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-400 shrink-0">
+            <div className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-400 shrink-0 shadow-inner">
               {playbackState.isPlaying ? (
                 <div className="flex items-end justify-center gap-0.5 h-5 w-5">
                   <motion.span 
@@ -151,38 +164,100 @@ export const AudioPlayerBar: React.FC<AudioPlayerBarProps> = ({ appLang }) => {
             </div>
 
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="font-bold text-sm sm:text-base truncate text-white">
                   {playbackState.title || (appLang === 'am' ? 'የመጽሐፍ ቅዱስ ንባብ' : appLang === 'fr' ? 'Lecture Audio des Écritures' : 'Scripture Narration')}
                 </span>
+                
+                {/* Engine Badge */}
+                {playbackState.engine === 'wordproject' ? (
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                    <Mic className="w-2.5 h-2.5" />
+                    WordProject
+                  </span>
+                ) : playbackState.engine === 'ai' ? (
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1">
+                    <Sparkles className="w-2.5 h-2.5" />
+                    Studio AI
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-stone-700 text-stone-300">
+                    Device TTS
+                  </span>
+                )}
+
+                {/* Language Tag */}
                 <span className="text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-300 border border-amber-400/30">
                   {playbackState.currentLanguage === 'am' ? '🇪🇹 አማርኛ' : playbackState.currentLanguage === 'fr' ? '🇫🇷 Français' : '🇬🇧 English'}
                 </span>
               </div>
-              <p className="text-xs text-stone-400 truncate mt-0.5 font-ethiopic">
-                {playbackState.currentText || (playbackState.isLoading ? (appLang === 'am' ? 'ድምጽ በመዘጋጀት ላይ...' : 'Loading audio stream...') : '')}
-              </p>
+
+              {/* Time Counter & Verse Subtitle */}
+              <div className="flex items-center gap-2 mt-0.5 text-xs text-stone-400">
+                {playbackState.duration > 0 && (
+                  <span className="font-mono text-amber-400 font-semibold shrink-0">
+                    {formatAudioTime(playbackState.currentTime)} / {formatAudioTime(playbackState.duration)}
+                  </span>
+                )}
+                {playbackState.currentVerse && (
+                  <button
+                    onClick={() => {
+                      if (playbackState.currentVerseId) {
+                        const el = document.getElementById(`verse-${playbackState.currentVerseId}`);
+                        el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      }
+                    }}
+                    className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold text-[10px] hover:bg-amber-500/40 transition-colors shrink-0 flex items-center gap-1 cursor-pointer"
+                    title="Click to jump to this verse in the text"
+                  >
+                    <span>{appLang === 'am' ? `ቁጥር ${playbackState.currentVerse.verse}` : `v.${playbackState.currentVerse.verse}`}</span>
+                    {playbackState.totalVerses > 0 && (
+                      <span className="opacity-70 font-normal">/{playbackState.totalVerses}</span>
+                    )}
+                  </button>
+                )}
+                <p 
+                  onClick={() => {
+                    if (playbackState.currentVerseId) {
+                      const el = document.getElementById(`verse-${playbackState.currentVerseId}`);
+                      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                  }}
+                  className="truncate font-ethiopic cursor-pointer hover:text-amber-300 transition-colors"
+                  title="Click to locate this verse"
+                >
+                  {playbackState.currentText || (playbackState.isLoading ? (appLang === 'am' ? 'ኦዲዮ በመጫን ላይ...' : 'Loading audio track...') : '')}
+                </p>
+              </div>
             </div>
           </div>
 
           {/* Center / Right: Primary Controls */}
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
             
-            {/* Previous Verse Button */}
+            {/* Previous Verse */}
             <button
               onClick={() => audioReader.previousVerse()}
-              disabled={playbackState.totalVerses <= 1}
-              className="p-2 rounded-xl hover:bg-stone-800 text-stone-300 disabled:opacity-40 disabled:hover:bg-transparent transition-colors"
-              title="Previous Verse"
+              className="p-2 rounded-xl hover:bg-stone-800 text-stone-300 transition-colors"
+              title="Previous Verse (ወደ ቀዳሚው ቁጥር)"
             >
               <SkipBack className="w-4 h-4" />
+            </button>
+
+            {/* Rewind 10s */}
+            <button
+              onClick={() => audioReader.skipSeconds(-10)}
+              className="hidden sm:inline-flex p-2 rounded-xl hover:bg-stone-800 text-stone-400 hover:text-stone-300 transition-colors"
+              title="Rewind 10 Seconds"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
             </button>
 
             {/* Play/Pause Button */}
             <button
               onClick={handleTogglePlay}
               disabled={playbackState.isLoading}
-              className="w-10 h-10 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-stone-950 font-bold flex items-center justify-center shadow-lg shadow-amber-500/20 transition-transform active:scale-95 disabled:opacity-50"
+              className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-stone-950 font-bold flex items-center justify-center shadow-lg shadow-amber-500/20 transition-transform active:scale-95 disabled:opacity-50"
               title={playbackState.isPlaying ? 'Pause' : 'Play'}
             >
               {playbackState.isLoading ? (
@@ -198,12 +273,20 @@ export const AudioPlayerBar: React.FC<AudioPlayerBarProps> = ({ appLang }) => {
               )}
             </button>
 
-            {/* Next Verse Button */}
+            {/* Fast Forward 10s */}
+            <button
+              onClick={() => audioReader.skipSeconds(10)}
+              className="hidden sm:inline-flex p-2 rounded-xl hover:bg-stone-800 text-stone-400 hover:text-stone-300 transition-colors"
+              title="Fast-Forward 10 Seconds"
+            >
+              <RotateCw className="w-3.5 h-3.5" />
+            </button>
+
+            {/* Next Verse */}
             <button
               onClick={() => audioReader.nextVerse()}
-              disabled={playbackState.totalVerses <= 1}
-              className="p-2 rounded-xl hover:bg-stone-800 text-stone-300 disabled:opacity-40 disabled:hover:bg-transparent transition-colors"
-              title="Next Verse"
+              className="p-2 rounded-xl hover:bg-stone-800 text-stone-300 transition-colors"
+              title="Next Verse (ወደ ቀጣዩ ቁጥር)"
             >
               <SkipForward className="w-4 h-4" />
             </button>
@@ -225,7 +308,7 @@ export const AudioPlayerBar: React.FC<AudioPlayerBarProps> = ({ appLang }) => {
                   ? 'bg-amber-500/20 border-amber-500/50 text-amber-300' 
                   : 'bg-stone-800 border-stone-700 text-stone-300 hover:bg-stone-700'
               }`}
-              title="Audio Reader Settings"
+              title="Audio Engine & Voice Options"
             >
               {isExpanded ? <ChevronDown className="w-4 h-4" /> : <Settings className="w-4 h-4" />}
             </button>
@@ -240,24 +323,80 @@ export const AudioPlayerBar: React.FC<AudioPlayerBarProps> = ({ appLang }) => {
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
               transition={{ duration: 0.2 }}
-              className="px-4 pb-4 pt-2 border-t border-stone-800/80 bg-stone-950/60 space-y-3.5 text-xs"
+              className="px-4 pb-4 pt-2 border-t border-stone-800/80 bg-stone-950/75 space-y-3 text-xs"
             >
-              {/* Language Mode Selector */}
+              {/* Audio Source Engine Selector */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <span className="text-stone-300 flex items-center gap-1.5 font-semibold">
+                    <Mic className="w-3.5 h-3.5 text-amber-400" />
+                    {appLang === 'am' ? 'የድምጽ ምንጭ ሞተር' : 'Audio Engine & Source'}:
+                  </span>
+                  <p className="text-[11px] text-stone-400 mt-0.5">
+                    {playbackState.engine === 'wordproject' 
+                      ? (appLang === 'am' ? '🎙️ WordProject እውነተኛ የሰው ድምጽ ንባብ (አማርኛ፣ እንግሊዝኛ፣ ፈረንሳይኛ)' : '🎙️ WordProject Authentic Human Narration (Amharic, KJV, French)')
+                      : playbackState.engine === 'ai'
+                      ? (appLang === 'am' ? '✨ Gemini Studio AI የቁጥር በቁጥር ንባብ' : '✨ Gemini Studio AI HD Verse-by-Verse Speech')
+                      : (appLang === 'am' ? '📻 የብሮውዘር ድምጽ (መሣሪያ)' : '📻 Local Device Fallback TTS')}
+                  </p>
+                </div>
+
+                <div className="flex items-center bg-stone-900 p-0.5 rounded-xl border border-stone-800 flex-wrap">
+                  <button
+                    onClick={() => handleEngineChange('wordproject')}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-medium flex items-center gap-1.5 transition-all ${
+                      playbackState.engine === 'wordproject' 
+                        ? 'bg-emerald-500 text-stone-950 font-bold shadow-md shadow-emerald-500/20' 
+                        : 'text-stone-400 hover:text-stone-200'
+                    }`}
+                    title="WordProject Official Bible MP3 Recordings (Amharic, English, French)"
+                  >
+                    <Mic className="w-3 h-3" />
+                    WordProject (Human)
+                  </button>
+                  <button
+                    onClick={() => handleEngineChange('ai')}
+                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium flex items-center gap-1.5 transition-all ${
+                      playbackState.engine === 'ai' 
+                        ? 'bg-amber-500 text-stone-950 font-bold shadow-md shadow-amber-500/20' 
+                        : 'text-stone-400 hover:text-stone-200'
+                    }`}
+                    title="AI Studio Gemini TTS Engine"
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    Studio AI (HD)
+                  </button>
+                  <button
+                    onClick={() => handleEngineChange('browser')}
+                    className={`px-2 py-1.5 rounded-lg text-[11px] font-medium flex items-center gap-1 transition-all ${
+                      playbackState.engine === 'browser' 
+                        ? 'bg-stone-800 text-stone-200 font-bold' 
+                        : 'text-stone-500 hover:text-stone-300'
+                    }`}
+                    title="Native Device Speech Engine"
+                  >
+                    <Radio className="w-3 h-3" />
+                    Browser Native
+                  </button>
+                </div>
+              </div>
+
+              {/* Language Mode Selector */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1 border-t border-stone-800/60">
                 <span className="text-stone-400 flex items-center gap-1.5 font-medium">
                   <Globe className="w-3.5 h-3.5 text-amber-400" />
-                  {appLang === 'am' ? 'የንባብ ቋንቋ ሞድ' : 'Playback Language Mode'}:
+                  {appLang === 'am' ? 'የንባብ ቋንቋ' : 'Audio Language'}:
                 </span>
                 <div className="flex items-center gap-1 bg-stone-900 p-1 rounded-xl border border-stone-800 flex-wrap">
                   <button
-                    onClick={() => handleLangModeChange('fr')}
-                    className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
-                      playbackState.langMode === 'fr' 
+                    onClick={() => handleLangModeChange('am')}
+                    className={`px-2.5 py-1 rounded-lg font-medium font-ethiopic transition-all ${
+                      playbackState.langMode === 'am' 
                         ? 'bg-amber-600 text-white font-semibold shadow-sm' 
                         : 'text-stone-400 hover:text-stone-200'
                     }`}
                   >
-                    🇫🇷 Français
+                    🇪🇹 አማርኛ
                   </button>
                   <button
                     onClick={() => handleLangModeChange('en')}
@@ -270,82 +409,53 @@ export const AudioPlayerBar: React.FC<AudioPlayerBarProps> = ({ appLang }) => {
                     🇬🇧 English
                   </button>
                   <button
-                    onClick={() => handleLangModeChange('am')}
-                    className={`px-2.5 py-1 rounded-lg font-medium font-ethiopic transition-all ${
-                      playbackState.langMode === 'am' 
-                        ? 'bg-amber-600 text-white font-semibold shadow-sm' 
-                        : 'text-stone-400 hover:text-stone-200'
-                    }`}
-                  >
-                    🇪🇹 አማርኛ
-                  </button>
-                  <button
-                    onClick={() => handleLangModeChange('parallel')}
+                    onClick={() => handleLangModeChange('fr')}
                     className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
-                      playbackState.langMode === 'parallel' 
+                      playbackState.langMode === 'fr' 
                         ? 'bg-amber-600 text-white font-semibold shadow-sm' 
                         : 'text-stone-400 hover:text-stone-200'
                     }`}
                   >
-                    ⚡ Parallel
+                    🇫🇷 Français
                   </button>
+                  {playbackState.engine !== 'wordproject' && (
+                    <button
+                      onClick={() => handleLangModeChange('parallel')}
+                      className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
+                        playbackState.langMode === 'parallel' 
+                          ? 'bg-amber-600 text-white font-semibold shadow-sm' 
+                          : 'text-stone-400 hover:text-stone-200'
+                      }`}
+                    >
+                      ⚡ Parallel
+                    </button>
+                  )}
                 </div>
               </div>
 
-              {/* Voice & Engine Selector */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <span className="text-stone-400 flex items-center gap-1.5 font-medium">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                  {appLang === 'am' ? 'የአንባቢ ድምጽ' : 'Narrator Voice'}:
-                </span>
-                
-                <div className="flex items-center gap-2 flex-wrap">
+              {/* AI Voice Selector (If AI Engine Active) */}
+              {playbackState.engine === 'ai' && (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1 border-t border-stone-800/60">
+                  <span className="text-stone-400 flex items-center gap-1.5 font-medium">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                    {appLang === 'am' ? 'የአንባቢ ድምጽ' : 'AI Voice Persona'}:
+                  </span>
                   <select
                     value={playbackState.selectedVoiceId}
                     onChange={(e) => handleVoiceChange(e.target.value)}
-                    className="bg-stone-900 border border-stone-700 text-stone-200 rounded-xl px-2.5 py-1.5 text-xs focus:outline-none focus:border-amber-500"
+                    className="bg-stone-900 border border-amber-500/40 text-amber-200 rounded-xl px-2.5 py-1.5 text-xs focus:outline-none focus:border-amber-400"
                   >
-                    <optgroup label="✨ AI Studio HD Scripture Voices">
-                      {AI_VOICES.map((voice) => (
-                        <option key={voice.id} value={voice.id}>
-                          {appLang === 'am' ? voice.nameAm : voice.name} ({voice.gender})
-                        </option>
-                      ))}
-                    </optgroup>
+                    {AI_VOICES.map((voice) => (
+                      <option key={voice.id} value={voice.id}>
+                        {appLang === 'am' ? voice.nameAm : voice.name} ({voice.gender})
+                      </option>
+                    ))}
                   </select>
-
-                  {/* Engine Toggle (AI Studio vs Web Speech) */}
-                  <div className="flex items-center bg-stone-900 p-0.5 rounded-xl border border-stone-800">
-                    <button
-                      onClick={() => handleEngineChange('ai')}
-                      className={`px-2 py-1 rounded-lg text-[11px] font-medium flex items-center gap-1 ${
-                        playbackState.engine === 'ai' 
-                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' 
-                          : 'text-stone-500 hover:text-stone-300'
-                      }`}
-                      title="AI Studio Gemini TTS"
-                    >
-                      <Sparkles className="w-3 h-3" />
-                      Studio AI
-                    </button>
-                    <button
-                      onClick={() => handleEngineChange('browser')}
-                      className={`px-2 py-1 rounded-lg text-[11px] font-medium flex items-center gap-1 ${
-                        playbackState.engine === 'browser' 
-                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' 
-                          : 'text-stone-500 hover:text-stone-300'
-                      }`}
-                      title="Native Device Speech Engine"
-                    >
-                      <Radio className="w-3 h-3" />
-                      Browser Native
-                    </button>
-                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Speed & Volume Controls */}
-              <div className="flex items-center justify-between gap-4 pt-1">
+              <div className="flex items-center justify-between gap-4 pt-2 border-t border-stone-800/60">
                 {/* Speed selector */}
                 <div className="flex items-center gap-1.5">
                   <span className="text-stone-400">{appLang === 'am' ? 'ፍጥነት' : 'Speed'}:</span>
@@ -391,13 +501,12 @@ export const AudioPlayerBar: React.FC<AudioPlayerBarProps> = ({ appLang }) => {
                 </div>
               </div>
 
-              {/* Helpful Voice Description */}
-              <div className="text-[11px] text-stone-500 italic bg-stone-900/60 p-2 rounded-xl border border-stone-800/60">
-                <span className="font-semibold text-stone-400">
-                  {currentVoiceObj.name}:
-                </span>{' '}
-                {currentVoiceObj.description}
-              </div>
+              {/* WordProject attribution banner */}
+              {playbackState.engine === 'wordproject' && (
+                <div className="text-[11px] text-stone-400 bg-emerald-950/30 border border-emerald-500/20 p-2 rounded-xl flex items-center justify-between">
+                  <span>🎙️ Audio recordings provided by <strong>WordProject.org</strong> (Talking Bibles & KJV audio archives).</span>
+                </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>

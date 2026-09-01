@@ -590,6 +590,68 @@ app.post('/api/audio/tts', async (req, res) => {
   }
 });
 
+// --- WORDPROJECT HUMAN NARRATION AUDIO STREAMING PROXY ---
+const WORDPROJECT_LANG_IDS: Record<string, number> = {
+  am: 17, // Amharic
+  en: 1,  // English (KJV)
+  fr: 7,  // French (Louis Segond)
+};
+
+app.get('/api/audio/wordproject/:lang/:bookNum/:chapter', async (req, res) => {
+  try {
+    const { lang, bookNum, chapter } = req.params;
+    const langId = WORDPROJECT_LANG_IDS[lang] || 17;
+    const bookNumber = parseInt(bookNum, 10);
+    const chapterNumber = parseInt(chapter, 10);
+
+    if (isNaN(bookNumber) || isNaN(chapterNumber) || bookNumber < 1 || bookNumber > 66 || chapterNumber < 1) {
+      return res.status(400).json({ error: 'Invalid book or chapter number.' });
+    }
+
+    const targetUrl = `https://www.wordproaudio.net/bibles/app/audio/${langId}/${bookNumber}/${chapterNumber}.mp3`;
+
+    // Forward range header if present for audio scrubbing/seeking
+    const headers: Record<string, string> = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    };
+    if (req.headers.range) {
+      headers['Range'] = req.headers.range;
+    }
+
+    const audioRes = await fetch(targetUrl, { headers });
+
+    if (!audioRes.ok && audioRes.status !== 206) {
+      return res.status(audioRes.status).json({ error: 'Audio file not found on WordProject server.' });
+    }
+
+    res.status(audioRes.status);
+    res.setHeader('Content-Type', audioRes.headers.get('content-type') || 'audio/mpeg');
+    if (audioRes.headers.get('content-length')) {
+      res.setHeader('Content-Length', audioRes.headers.get('content-length')!);
+    }
+    if (audioRes.headers.get('content-range')) {
+      res.setHeader('Content-Range', audioRes.headers.get('content-range')!);
+    }
+    if (audioRes.headers.get('accept-ranges')) {
+      res.setHeader('Accept-Ranges', audioRes.headers.get('accept-ranges')!);
+    }
+    res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+
+    if (audioRes.body) {
+      // @ts-ignore
+      const { Readable } = await import('stream');
+      // @ts-ignore
+      Readable.fromWeb(audioRes.body).pipe(res);
+    } else {
+      const arrayBuffer = await audioRes.arrayBuffer();
+      res.send(Buffer.from(arrayBuffer));
+    }
+  } catch (err: any) {
+    console.error('WordProject audio proxy error:', err);
+    res.status(500).json({ error: 'Failed to stream WordProject audio.' });
+  }
+});
+
 // --- HEALTH CHECK ---
 app.get('/api/health', (req, res) => {
   res.json({

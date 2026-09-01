@@ -3,7 +3,7 @@ import {
   BookOpen, Search, ChevronLeft, ChevronRight, Bookmark, 
   Volume2, VolumeX, Download, Check, Settings, Sparkles, 
   Columns2, Rows, Maximize2, Minimize2, BookmarkCheck, FileText, ArrowRight,
-  Play, Pause, Globe, Music
+  Play, Pause, Globe, Music, Eye
 } from 'lucide-react';
 import { BibleBook, BibleVerse, ChapterContent, HighlightItem, Language } from '../types';
 import { BIBLE_BOOKS, getChapterContent } from '../data/bibleData';
@@ -46,6 +46,7 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
   const [isAudioMenuOpen, setIsAudioMenuOpen] = useState(false);
   const [playbackState, setPlaybackState] = useState<AudioPlaybackState>(audioReader.getState());
   const [activeVerseAudioMenuId, setActiveVerseAudioMenuId] = useState<string | null>(null);
+  const [autoScrollWithAudio, setAutoScrollWithAudio] = useState(true);
 
   const activeBook = BIBLE_BOOKS.find(b => b.id === selectedBookId) || BIBLE_BOOKS[0];
   const chapterData: ChapterContent = getChapterContent(activeBook.id, selectedChapter);
@@ -56,11 +57,11 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
     const unsubscribe = audioReader.subscribe((state) => {
       setPlaybackState(state);
       
-      // Auto-scroll active verse into view if it changes
-      if (state.isPlaying && state.currentVerseId && state.currentVerseId !== 'custom') {
+      // Auto-scroll active verse into view if auto-scroll is enabled
+      if (autoScrollWithAudio && (state.isPlaying || state.isPaused) && state.currentVerseId && state.currentVerseId !== 'custom') {
         const verseEl = document.getElementById(`verse-${state.currentVerseId}`);
         if (verseEl) {
-          verseEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          verseEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
       }
     });
@@ -68,7 +69,7 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
     return () => {
       unsubscribe();
     };
-  }, []);
+  }, [autoScrollWithAudio]);
 
   useEffect(() => {
     setIsOfflineSaved(StorageManager.isChapterCached(chapterKey));
@@ -142,14 +143,21 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
   };
 
   // Audio Playback Triggers
-  const handlePlayChapter = (mode: AudioLangMode) => {
+  const handlePlayChapter = (mode: AudioLangMode, engine: 'wordproject' | 'ai' = 'wordproject') => {
     setIsAudioMenuOpen(false);
-    audioReader.playChapter(
-      chapterData.verses,
-      0,
-      mode,
-      `${activeBook.nameEn} ${selectedChapter} • ${activeBook.nameAm} ${selectedChapter}`
-    );
+    audioReader.setEngine(engine);
+    if (engine === 'wordproject') {
+      const targetLang = (mode === 'am' || mode === 'fr' || mode === 'en') ? mode : 'am';
+      const bookName = targetLang === 'am' ? activeBook.nameAm : (targetLang === 'fr' ? (activeBook.nameFr || activeBook.nameEn) : activeBook.nameEn);
+      audioReader.playWordProjectChapter(activeBook.id, selectedChapter, targetLang, bookName, chapterData.verses);
+    } else {
+      audioReader.playChapter(
+        chapterData.verses,
+        0,
+        mode,
+        `${activeBook.nameEn} ${selectedChapter} • ${activeBook.nameAm} ${selectedChapter}`
+      );
+    }
   };
 
   const handlePlaySingleVerse = (verse: BibleVerse, mode: AudioLangMode, e: React.MouseEvent) => {
@@ -158,14 +166,45 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
     audioReader.playVerse(verse, mode);
   };
 
+  const handlePlayFromVerse = (verse: BibleVerse, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setActiveVerseAudioMenuId(null);
+    const verseIndex = chapterData.verses.findIndex(v => v.id === verse.id);
+    const targetIndex = verseIndex >= 0 ? verseIndex : 0;
+    
+    // If chapter audio is already loaded/playing for this chapter, seek directly
+    if (playbackState.isWordProjectAudio && playbackState.currentBookId === activeBook.id && playbackState.currentChapter === selectedChapter) {
+      audioReader.seekToVerse(targetIndex);
+      if (!playbackState.isPlaying) {
+        audioReader.resume();
+      }
+      return;
+    }
+
+    const defaultMode: AudioLangMode = viewMode === 'parallel' ? 'parallel' : viewMode;
+    const targetLang: 'am' | 'en' | 'fr' = (viewMode === 'en' || viewMode === 'fr') ? viewMode : 'am';
+    const bookName = targetLang === 'am' ? activeBook.nameAm : (targetLang === 'fr' ? (activeBook.nameFr || activeBook.nameEn) : activeBook.nameEn);
+    
+    if (playbackState.engine === 'wordproject') {
+      audioReader.playWordProjectChapter(activeBook.id, selectedChapter, targetLang, bookName, chapterData.verses, targetIndex);
+    } else {
+      audioReader.playChapter(
+        chapterData.verses,
+        targetIndex,
+        defaultMode,
+        `${activeBook.nameEn} ${selectedChapter} • ${activeBook.nameAm} ${selectedChapter}`
+      );
+    }
+  };
+
   const handleTogglePlayState = () => {
     if (playbackState.isPlaying) {
       audioReader.pause();
     } else if (playbackState.isPaused) {
       audioReader.resume();
     } else {
-      const defaultMode: AudioLangMode = viewMode === 'am' ? 'am' : viewMode === 'en' ? 'en' : 'parallel';
-      handlePlayChapter(defaultMode);
+      const defaultMode: AudioLangMode = viewMode === 'am' ? 'am' : viewMode === 'en' ? 'en' : 'am';
+      handlePlayChapter(defaultMode, playbackState.engine || 'wordproject');
     }
   };
 
@@ -176,7 +215,10 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
     b.id.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const isCurrentChapterPlaying = playbackState.isPlaying && chapterData.verses.some(v => v.id === playbackState.currentVerseId);
+  const isCurrentChapterPlaying = playbackState.isPlaying && (
+    (playbackState.isWordProjectAudio && playbackState.currentBookId === activeBook.id && playbackState.currentChapter === selectedChapter) ||
+    chapterData.verses.some(v => v.id === playbackState.currentVerseId)
+  );
 
   return (
     <div className={`min-h-[calc(100vh-5rem)] ${getContainerBg()} transition-colors pb-16`}>
@@ -341,43 +383,116 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
 
               {/* Audio Dropdown Menu */}
               {isAudioMenuOpen && (
-                <div className="absolute right-0 mt-1.5 w-64 bg-white dark:bg-stone-900 rounded-2xl shadow-xl border border-stone-200 dark:border-stone-800 p-2 z-50 text-xs space-y-1 animate-in fade-in">
-                  <div className="px-2 py-1 text-[11px] font-bold text-stone-400 uppercase tracking-wider">
-                    {lang === 'am' ? 'የድምጽ ንባብ ቋንቋ ምረጥ' : 'Select Audio Narration'}
+                <div className="absolute right-0 mt-1.5 w-72 bg-white dark:bg-stone-900 rounded-2xl shadow-2xl border border-stone-200 dark:border-stone-800 p-2.5 z-50 text-xs space-y-2 animate-in fade-in">
+                  
+                  {/* WordProject Human Audio Section */}
+                  <div>
+                    <div className="px-2 py-1 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider flex items-center justify-between">
+                      <span>{lang === 'am' ? '🎙️ WordProject እውነተኛ የሰው ድምጽ' : '🎙️ WordProject Human Audio'}</span>
+                      <span className="text-[9px] bg-emerald-500/10 px-1.5 py-0.5 rounded text-emerald-600 dark:text-emerald-400 font-semibold">Official</span>
+                    </div>
+                    
+                    <button
+                      onClick={() => handlePlayChapter('am', 'wordproject')}
+                      className="w-full text-left px-2.5 py-2 rounded-xl hover:bg-emerald-50 dark:hover:bg-stone-800/80 flex items-center justify-between text-stone-800 dark:text-stone-200 font-medium transition-colors"
+                    >
+                      <span className="flex items-center gap-2">
+                        <span>🇪🇹</span>
+                        <div>
+                          <p className="font-semibold font-ethiopic">አማርኛ (WordProject Audio)</p>
+                          <p className="text-[10px] text-stone-500">Authentic Ethiopian narration</p>
+                        </div>
+                      </span>
+                      <Volume2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    </button>
+
+                    <button
+                      onClick={() => handlePlayChapter('en', 'wordproject')}
+                      className="w-full text-left px-2.5 py-2 rounded-xl hover:bg-emerald-50 dark:hover:bg-stone-800/80 flex items-center justify-between text-stone-800 dark:text-stone-200 font-medium transition-colors"
+                    >
+                      <span className="flex items-center gap-2">
+                        <span>🇬🇧</span>
+                        <div>
+                          <p className="font-semibold">English KJV (WordProject Audio)</p>
+                          <p className="text-[10px] text-stone-500">Classic Holy Scripture reading</p>
+                        </div>
+                      </span>
+                      <Volume2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    </button>
+
+                    <button
+                      onClick={() => handlePlayChapter('fr', 'wordproject')}
+                      className="w-full text-left px-2.5 py-2 rounded-xl hover:bg-emerald-50 dark:hover:bg-stone-800/80 flex items-center justify-between text-stone-800 dark:text-stone-200 font-medium transition-colors"
+                    >
+                      <span className="flex items-center gap-2">
+                        <span>🇫🇷</span>
+                        <div>
+                          <p className="font-semibold">Français (Louis Segond Audio)</p>
+                          <p className="text-[10px] text-stone-500">WordProject narration française</p>
+                        </div>
+                      </span>
+                      <Volume2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    </button>
                   </div>
-                  <button
-                    onClick={() => handlePlayChapter('am')}
-                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-amber-50 dark:hover:bg-stone-800 flex items-center justify-between text-stone-800 dark:text-stone-200 font-medium"
-                  >
-                    <span className="flex items-center gap-2">
-                      <span>🇪🇹</span>
-                      <span className="font-ethiopic">አማርኛ ብቻ (Amharic)</span>
-                    </span>
-                    <Volume2 className="w-3.5 h-3.5 text-amber-600" />
-                  </button>
-                  <button
-                    onClick={() => handlePlayChapter('en')}
-                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-amber-50 dark:hover:bg-stone-800 flex items-center justify-between text-stone-800 dark:text-stone-200 font-medium"
-                  >
-                    <span className="flex items-center gap-2">
-                      <span>🇬🇧</span>
-                      <span>English Only</span>
-                    </span>
-                    <Volume2 className="w-3.5 h-3.5 text-amber-600" />
-                  </button>
-                  <button
-                    onClick={() => handlePlayChapter('parallel')}
-                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-amber-50 dark:hover:bg-stone-800 flex items-center justify-between text-stone-800 dark:text-stone-200 font-medium"
-                  >
-                    <span className="flex items-center gap-2">
-                      <span>⚡</span>
-                      <span>Parallel (EN + አማርኛ)</span>
-                    </span>
-                    <Volume2 className="w-3.5 h-3.5 text-amber-600" />
-                  </button>
+
+                  {/* Studio AI HD TTS Section */}
+                  <div className="pt-2 border-t border-stone-200 dark:border-stone-800">
+                    <div className="px-2 py-1 text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider flex items-center justify-between">
+                      <span>{lang === 'am' ? '✨ ስቱዲዮ AI ድምጽ (ቁጥር በቁጥር)' : '✨ Studio AI HD (Verse-by-Verse)'}</span>
+                      <Sparkles className="w-3 h-3 text-amber-500" />
+                    </div>
+
+                    <button
+                      onClick={() => handlePlayChapter('am', 'ai')}
+                      className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-amber-50 dark:hover:bg-stone-800/80 flex items-center justify-between text-stone-800 dark:text-stone-200 font-medium transition-colors"
+                    >
+                      <span className="flex items-center gap-2">
+                        <span>🇪🇹</span>
+                        <span className="font-ethiopic">አማርኛ AI (Kore Voice)</span>
+                      </span>
+                      <Volume2 className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    </button>
+
+                    <button
+                      onClick={() => handlePlayChapter('en', 'ai')}
+                      className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-amber-50 dark:hover:bg-stone-800/80 flex items-center justify-between text-stone-800 dark:text-stone-200 font-medium transition-colors"
+                    >
+                      <span className="flex items-center gap-2">
+                        <span>🇬🇧</span>
+                        <span>English AI (Fenrir Voice)</span>
+                      </span>
+                      <Volume2 className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    </button>
+
+                    <button
+                      onClick={() => handlePlayChapter('parallel', 'ai')}
+                      className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-amber-50 dark:hover:bg-stone-800/80 flex items-center justify-between text-stone-800 dark:text-stone-200 font-medium transition-colors"
+                    >
+                      <span className="flex items-center gap-2">
+                        <span>⚡</span>
+                        <span>Parallel (EN + አማርኛ)</span>
+                      </span>
+                      <Volume2 className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    </button>
+                  </div>
+
                 </div>
               )}
             </div>
+
+            {/* Text Auto-Tracking & Auto-Scroll with Audio Toggle */}
+            <button
+              onClick={() => setAutoScrollWithAudio(!autoScrollWithAudio)}
+              className={`p-2 rounded-xl border text-xs flex items-center gap-1.5 font-medium transition-all ${
+                autoScrollWithAudio
+                  ? 'bg-amber-100 dark:bg-amber-950/60 border-amber-400 text-amber-900 dark:text-amber-300 shadow-xs'
+                  : 'bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 border-stone-200 dark:border-stone-700 text-stone-500'
+              }`}
+              title={autoScrollWithAudio ? 'Text Auto-Tracking Active (Auto-scrolls as audio plays)' : 'Enable Text Auto-Tracking with Audio'}
+            >
+              <Eye className={`w-4 h-4 ${autoScrollWithAudio ? 'text-amber-600 dark:text-amber-400 animate-pulse' : 'text-stone-400'}`} />
+              <span className="hidden xl:inline">{autoScrollWithAudio ? 'Track Text: ON' : 'Track Text: OFF'}</span>
+            </button>
 
             {/* Offline Cache Button */}
             <button
@@ -605,7 +720,19 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
 
                     {/* Verse Audio Popover Menu */}
                     {isMenuOpen && (
-                      <div className="absolute right-0 mt-1 w-52 bg-white dark:bg-stone-900 rounded-xl shadow-xl border border-stone-200 dark:border-stone-800 p-1.5 z-50 text-xs space-y-1 animate-in fade-in">
+                      <div className="absolute right-0 mt-1 w-60 bg-white dark:bg-stone-900 rounded-xl shadow-xl border border-stone-200 dark:border-stone-800 p-1.5 z-50 text-xs space-y-1 animate-in fade-in">
+                        <div className="px-2 py-1 text-[10px] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider border-b border-stone-100 dark:border-stone-800">
+                          Verse {verse.verse} Audio
+                        </div>
+                        <button
+                          onClick={(e) => handlePlayFromVerse(verse, e)}
+                          className="w-full text-left px-2.5 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 flex items-center justify-between text-amber-900 dark:text-amber-200 font-semibold"
+                        >
+                          <span className="flex items-center gap-1.5">
+                            <Play className="w-3.5 h-3.5 fill-current" />
+                            <span>{lang === 'am' ? 'ከዚህ ቁጥር ጀምሮ አድምጥ' : 'Play audio from this verse'}</span>
+                          </span>
+                        </button>
                         <button
                           onClick={(e) => handlePlaySingleVerse(verse, 'am', e)}
                           className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-amber-50 dark:hover:bg-stone-800 flex items-center justify-between text-stone-800 dark:text-stone-200"
@@ -735,6 +862,29 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
             <ChevronRight className="w-4 h-4" />
           </button>
         </div>
+
+        {/* Floating Active Recitation Pill */}
+        {isCurrentChapterPlaying && playbackState.currentVerse && (
+          <div className="fixed bottom-24 right-6 z-40 animate-in slide-in-from-bottom-3 duration-300">
+            <button
+              onClick={() => {
+                if (playbackState.currentVerseId) {
+                  const el = document.getElementById(`verse-${playbackState.currentVerseId}`);
+                  el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+              }}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-stone-900/90 hover:bg-stone-900 dark:bg-amber-600 dark:hover:bg-amber-500 text-white text-xs font-semibold shadow-2xl border border-amber-500/40 backdrop-blur-md transition-all hover:scale-105"
+              title="Jump to reciting verse in text"
+            >
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-400"></span>
+              </span>
+              <span>{lang === 'am' ? `ንባቡን ተከተል: ቁጥር ${playbackState.currentVerse.verse}` : `Reciting Verse ${playbackState.currentVerse.verse}`}</span>
+              <ArrowRight className="w-3.5 h-3.5 ml-0.5 opacity-80" />
+            </button>
+          </div>
+        )}
 
       </main>
 
