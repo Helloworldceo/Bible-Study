@@ -1,7 +1,5 @@
 import crypto from 'crypto';
-import fs from 'fs';
-import path from 'path';
-import Database from 'better-sqlite3';
+import { neon } from '@neondatabase/serverless';
 
 export interface StoredUser {
   id: string;
@@ -15,37 +13,52 @@ export interface StoredUser {
   data?: any;
 }
 
-const DATA_DIR = path.join(process.cwd(), 'data');
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+// Lazy, like getGeminiClient() in server.ts -- module-level imports resolve
+// (and this file's top-level code runs) before server.ts's dotenv.config()
+// call executes, so reading process.env.DATABASE_URL up here would always
+// see it as unset.
+type SqlClient = ReturnType<typeof neon>;
+let sqlClient: SqlClient | null = null;
+function getSql(): SqlClient {
+  if (!sqlClient) {
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) {
+      throw new Error(
+        'DATABASE_URL is not set. Copy .env.example to .env and set it to your Neon connection string (use the pooled connection, without channel_binding=require).'
+      );
+    }
+    sqlClient = neon(connectionString);
+  }
+  return sqlClient;
 }
 
-const db = new Database(path.join(DATA_DIR, 'berean.db'));
-db.pragma('journal_mode = WAL');
+// Runs once at server startup (see server.ts) -- idempotent, safe to run on every boot.
+export async function initDb(): Promise<void> {
+  await getSql()`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      name TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      password_salt TEXT NOT NULL,
+      preferred_language TEXT NOT NULL DEFAULT 'en',
+      created_at TIMESTAMPTZ NOT NULL,
+      last_synced_at TIMESTAMPTZ,
+      data JSONB
+    )
+  `;
+  await getSql()`
+    CREATE TABLE IF NOT EXISTS tokens (
+      token TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      created_at TIMESTAMPTZ NOT NULL
+    )
+  `;
+}
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    email TEXT UNIQUE NOT NULL,
-    name TEXT NOT NULL,
-    password_hash TEXT NOT NULL,
-    password_salt TEXT NOT NULL,
-    preferred_language TEXT NOT NULL DEFAULT 'en',
-    created_at TEXT NOT NULL,
-    last_synced_at TEXT,
-    data TEXT
-  );
-
-  CREATE TABLE IF NOT EXISTS tokens (
-    token TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL REFERENCES users(id),
-    created_at TEXT NOT NULL
-  );
-`);
-
-// --- Password hashing (salted scrypt -- the old code used unsalted sha256,
-// which is crackable via precomputed rainbow tables; scrypt is deliberately
-// slow/memory-hard, which is what you want for password storage). ---
+// --- Password hashing (salted scrypt -- the original code used unsalted
+// sha256, which is crackable via precomputed rainbow tables; scrypt is
+// deliberately slow/memory-hard, which is what you want for passwords). ---
 const SCRYPT_KEYLEN = 64;
 
 export function hashPassword(password: string, salt?: string): { hash: string; salt: string } {
@@ -70,7 +83,7 @@ interface UserRow {
   preferred_language: string;
   created_at: string;
   last_synced_at: string | null;
-  data: string | null;
+  data: unknown | null;
 }
 
 function rowToUser(row: UserRow): StoredUser {
@@ -83,65 +96,46 @@ function rowToUser(row: UserRow): StoredUser {
     preferredLanguage: row.preferred_language as 'en' | 'am',
     createdAt: row.created_at,
     lastSyncedAt: row.last_synced_at ?? undefined,
-    data: row.data ? JSON.parse(row.data) : undefined,
+    data: row.data ?? undefined, // JSONB comes back already parsed
   };
 }
 
-const stmts = {
-  getByEmail: db.prepare('SELECT * FROM users WHERE email = ?'),
-  getById: db.prepare('SELECT * FROM users WHERE id = ?'),
-  insert: db.prepare(`
+export async function getUserByEmail(email: string): Promise<StoredUser | undefined> {
+  const rows = (await getSql()`SELECT * FROM users WHERE email = ${email}`) as UserRow[];
+  return rows[0] ? rowToUser(rows[0]) : undefined;
+}
+
+export async function getUserById(id: string): Promise<StoredUser | undefined> {
+  const rows = (await getSql()`SELECT * FROM users WHERE id = ${id}`) as UserRow[];
+  return rows[0] ? rowToUser(rows[0]) : undefined;
+}
+
+export async function createUser(user: StoredUser): Promise<void> {
+  await getSql()`
     INSERT INTO users (id, email, name, password_hash, password_salt, preferred_language, created_at, last_synced_at, data)
-    VALUES (@id, @email, @name, @passwordHash, @passwordSalt, @preferredLanguage, @createdAt, @lastSyncedAt, @data)
-  `),
-  updateData: db.prepare('UPDATE users SET data = ?, last_synced_at = ? WHERE id = ?'),
-  insertToken: db.prepare('INSERT INTO tokens (token, user_id, created_at) VALUES (?, ?, ?)'),
-  getTokenUserId: db.prepare('SELECT user_id FROM tokens WHERE token = ?'),
-};
-
-export function getUserByEmail(email: string): StoredUser | undefined {
-  const row = stmts.getByEmail.get(email) as UserRow | undefined;
-  return row ? rowToUser(row) : undefined;
+    VALUES (${user.id}, ${user.email}, ${user.name}, ${user.passwordHash}, ${user.passwordSalt}, ${user.preferredLanguage}, ${user.createdAt}, ${user.lastSyncedAt ?? null}, ${user.data ? JSON.stringify(user.data) : null})
+  `;
 }
 
-export function getUserById(id: string): StoredUser | undefined {
-  const row = stmts.getById.get(id) as UserRow | undefined;
-  return row ? rowToUser(row) : undefined;
+export async function updateUserData(userId: string, data: any, syncedAt: string): Promise<void> {
+  await getSql()`UPDATE users SET data = ${JSON.stringify(data)}, last_synced_at = ${syncedAt} WHERE id = ${userId}`;
 }
 
-export function createUser(user: StoredUser): void {
-  stmts.insert.run({
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    passwordHash: user.passwordHash,
-    passwordSalt: user.passwordSalt,
-    preferredLanguage: user.preferredLanguage,
-    createdAt: user.createdAt,
-    lastSyncedAt: user.lastSyncedAt ?? null,
-    data: user.data ? JSON.stringify(user.data) : null,
-  });
+export async function createToken(token: string, userId: string): Promise<void> {
+  await getSql()`INSERT INTO tokens (token, user_id, created_at) VALUES (${token}, ${userId}, ${new Date().toISOString()})`;
 }
 
-export function updateUserData(userId: string, data: any, syncedAt: string): void {
-  stmts.updateData.run(JSON.stringify(data), syncedAt, userId);
-}
-
-export function createToken(token: string, userId: string): void {
-  stmts.insertToken.run(token, userId, new Date().toISOString());
-}
-
-export function getUserIdByToken(token: string): string | undefined {
-  const row = stmts.getTokenUserId.get(token) as { user_id: string } | undefined;
-  return row?.user_id;
+export async function getUserIdByToken(token: string): Promise<string | undefined> {
+  const rows = (await getSql()`SELECT user_id FROM tokens WHERE token = ${token}`) as { user_id: string }[];
+  return rows[0]?.user_id;
 }
 
 // Seed the demo account once, on first boot -- kept for the same instant
-// multi-device demo purpose the in-memory version served, now persisted.
-export function seedDemoUserIfMissing(): void {
-  if (getUserByEmail('davidabdisa40@gmail.com')) return;
+// multi-device demo purpose the earlier in-memory version served.
+export async function seedDemoUserIfMissing(): Promise<void> {
+  if (await getUserByEmail('davidabdisa40@gmail.com')) return;
   const { hash, salt } = hashPassword('password123');
-  createUser({
+  await createUser({
     id: 'user-berean-demo',
     email: 'davidabdisa40@gmail.com',
     name: 'David Abdisa',

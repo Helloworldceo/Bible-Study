@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import {
+  initDb,
   getUserByEmail,
   getUserById,
   createUser,
@@ -43,9 +44,9 @@ function getGeminiClient(): GoogleGenAI {
   return aiClient;
 }
 
-// Persistent SQLite-backed store for multi-device sync & auth (data/berean.db)
-// -- see db.ts. Seed a default demo user for instant multi-device demonstration.
-seedDemoUserIfMissing();
+// Persistent Neon Postgres store for multi-device sync & auth -- see db.ts.
+// Schema init and the demo-user seed run once at startup, before the server
+// starts accepting requests (see startServer() below).
 
 // Daily verses collection for Discord dispatch
 const DISCORD_VERSE_COLLECTION = [
@@ -87,14 +88,14 @@ const DISCORD_VERSE_COLLECTION = [
 ];
 
 // --- AUTH API ROUTES ---
-app.post('/api/auth/register', (req, res) => {
+app.post('/api/auth/register', async (req, res) => {
   try {
     const { email, password, name, preferredLanguage } = req.body;
     if (!email || !password || !name) {
       return res.status(400).json({ error: 'Email, password and name are required.' });
     }
     const normalizedEmail = email.toLowerCase().trim();
-    if (getUserByEmail(normalizedEmail)) {
+    if (await getUserByEmail(normalizedEmail)) {
       return res.status(400).json({ error: 'An account with this email already exists.' });
     }
 
@@ -110,9 +111,9 @@ app.post('/api/auth/register', (req, res) => {
       lastSyncedAt: new Date().toISOString(),
     };
 
-    createUser(newUser);
+    await createUser(newUser);
     const token = crypto.randomBytes(32).toString('hex');
-    createToken(token, newUser.id);
+    await createToken(token, newUser.id);
 
     return res.json({
       token,
@@ -130,20 +131,20 @@ app.post('/api/auth/register', (req, res) => {
   }
 });
 
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required.' });
     }
     const normalizedEmail = email.toLowerCase().trim();
-    const user = getUserByEmail(normalizedEmail);
+    const user = await getUserByEmail(normalizedEmail);
     if (!user || !verifyPassword(password, user.passwordHash, user.passwordSalt)) {
       return res.status(401).json({ error: 'Invalid email or password.' });
     }
 
     const token = crypto.randomBytes(32).toString('hex');
-    createToken(token, user.id);
+    await createToken(token, user.id);
 
     return res.json({
       token,
@@ -162,32 +163,36 @@ app.post('/api/auth/login', (req, res) => {
   }
 });
 
-app.get('/api/auth/me', (req, res) => {
-  const authHeader = req.headers.authorization;
-  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
-  const userId = token ? getUserIdByToken(token) : undefined;
-  if (!userId) {
-    return res.status(401).json({ error: 'Unauthorized or invalid token' });
-  }
-  const user = getUserById(userId);
-  if (!user) {
-    return res.status(404).json({ error: 'User not found' });
-  }
-
-  return res.json({
-    user: {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      preferredLanguage: user.preferredLanguage,
-      createdAt: user.createdAt,
-      lastSyncedAt: user.lastSyncedAt,
+app.get('/api/auth/me', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
+    const userId = token ? await getUserIdByToken(token) : undefined;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized or invalid token' });
     }
-  });
+    const user = await getUserById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    return res.json({
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        preferredLanguage: user.preferredLanguage,
+        createdAt: user.createdAt,
+        lastSyncedAt: user.lastSyncedAt,
+      }
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to fetch account' });
+  }
 });
 
 // --- MULTI-DEVICE CLOUD SYNC ---
-app.post('/api/sync/push', (req, res) => {
+app.post('/api/sync/push', async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
     const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
@@ -197,9 +202,9 @@ app.post('/api/sync/push', (req, res) => {
       return res.status(400).json({ error: 'Missing sync payload.' });
     }
 
-    const userId = token ? getUserIdByToken(token) : undefined;
+    const userId = token ? await getUserIdByToken(token) : undefined;
     if (userId) {
-      updateUserData(userId, payload, new Date().toISOString());
+      await updateUserData(userId, payload, new Date().toISOString());
     }
 
     return res.json({
@@ -212,12 +217,12 @@ app.post('/api/sync/push', (req, res) => {
   }
 });
 
-app.get('/api/sync/pull', (req, res) => {
+app.get('/api/sync/pull', async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
     const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
-    const userId = token ? getUserIdByToken(token) : undefined;
-    const targetUser = userId ? getUserById(userId) : undefined;
+    const userId = token ? await getUserIdByToken(token) : undefined;
+    const targetUser = userId ? await getUserById(userId) : undefined;
 
     return res.json({
       data: targetUser?.data || null,
@@ -646,6 +651,9 @@ app.get('/api/health', (req, res) => {
 
 // Vite Middleware for development & Static Serving for production
 async function startServer() {
+  await initDb();
+  await seedDemoUserIfMissing();
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
