@@ -6,7 +6,7 @@ import {
   Play, Pause, Globe, Music, Eye
 } from 'lucide-react';
 import { BibleBook, BibleVerse, ChapterContent, HighlightItem, Language } from '../types';
-import { BIBLE_BOOKS, fetchChapterContent } from '../data/bibleData';
+import { BIBLE_BOOKS, fetchChapterContent, ensureBookOffline } from '../data/bibleData';
 import { useTranslation } from '../utils/translations';
 import { StorageManager } from '../utils/offlineStorage';
 import { audioReader, AudioPlaybackState, AudioLangMode } from '../utils/audioReaderService';
@@ -49,7 +49,6 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
   const [autoScrollWithAudio, setAutoScrollWithAudio] = useState(true);
 
   const activeBook = BIBLE_BOOKS.find(b => b.id === selectedBookId) || BIBLE_BOOKS[0];
-  const chapterKey = `${activeBook.id}.${selectedChapter}`;
 
   // Chapter text loads asynchronously now (real scripture is fetched from
   // /bible/<BookId>.json rather than bundled) -- start with an empty shell
@@ -100,13 +99,22 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
   }, [autoScrollWithAudio]);
 
   useEffect(() => {
-    setIsOfflineSaved(StorageManager.isChapterCached(chapterKey));
-  }, [chapterKey]);
+    let cancelled = false;
+    StorageManager.isBookOfflineSaved(activeBook.id).then((saved) => {
+      if (!cancelled) setIsOfflineSaved(saved);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeBook.id, chapterData]);
 
-  // Handle saving for offline reading
+  // Handle saving for offline reading -- the whole book is already cached
+  // automatically as soon as a chapter loads (see fetchChapterContent), so
+  // this just makes sure that write has landed and reflects it in the UI.
   const handleSaveOffline = () => {
-    StorageManager.saveCachedChapter(chapterKey);
-    setIsOfflineSaved(true);
+    ensureBookOffline(activeBook.id).then(() => {
+      StorageManager.isBookOfflineSaved(activeBook.id).then(setIsOfflineSaved);
+    });
   };
 
   // Font size class mapping

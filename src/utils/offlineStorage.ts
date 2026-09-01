@@ -11,9 +11,28 @@ const STORAGE_KEYS = {
   DISCORD_CONFIG: 'berean_discord_config_v1',
   AUTH_USER: 'berean_auth_user_v1',
   AUTH_TOKEN: 'berean_auth_token_v1',
-  CACHED_CHAPTERS: 'berean_cached_chapters_v1',
   APP_LANG: 'berean_app_lang_v1',
 };
+
+const BIBLE_DB_NAME = 'berean_bible_cache_v1';
+const BIBLE_STORE_NAME = 'books';
+
+function openBibleDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (!('indexedDB' in window)) {
+      reject(new Error('IndexedDB unavailable'));
+      return;
+    }
+    const request = indexedDB.open(BIBLE_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(BIBLE_STORE_NAME)) {
+        request.result.createObjectStore(BIBLE_STORE_NAME);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
 
 const DEFAULT_DISCORD_CONFIG: DiscordConfig = {
   webhookUrl: '',
@@ -298,26 +317,43 @@ export class StorageManager {
     localStorage.setItem(STORAGE_KEYS.DISCORD_CONFIG, JSON.stringify(config));
   }
 
-  static getCachedChapters(): string[] {
+  // --- Offline Bible text cache (IndexedDB) ---
+  // Real scripture is fetched from /bible/<BookId>.json and runs up to
+  // ~800KB for a single book -- too large to track in localStorage's
+  // ~5-10MB origin quota once more than a couple of books are read.
+  // IndexedDB has a much higher ceiling and is the right tool for this.
+  // fetchChapterContent() (bibleData.ts) writes here automatically as
+  // chapters are read; the reader's "Save Offline" button just confirms it.
+  static async getOfflineBook(bookId: string): Promise<unknown | null> {
     try {
-      const data = localStorage.getItem(STORAGE_KEYS.CACHED_CHAPTERS);
-      return data ? JSON.parse(data) : ['GEN.1', 'PSA.23', 'MAT.5', 'JHN.1', 'ROM.8'];
+      const db = await openBibleDb();
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction(BIBLE_STORE_NAME, 'readonly');
+        const req = tx.objectStore(BIBLE_STORE_NAME).get(bookId);
+        req.onsuccess = () => resolve(req.result ?? null);
+        req.onerror = () => reject(req.error);
+      });
     } catch {
-      return [];
+      return null; // IndexedDB unavailable (private browsing, old browser, etc.)
     }
   }
 
-  static saveCachedChapter(chapterKey: string): string[] {
-    const list = this.getCachedChapters();
-    if (!list.includes(chapterKey)) {
-      list.push(chapterKey);
-      localStorage.setItem(STORAGE_KEYS.CACHED_CHAPTERS, JSON.stringify(list));
+  static async saveOfflineBook(bookId: string, data: unknown): Promise<void> {
+    try {
+      const db = await openBibleDb();
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(BIBLE_STORE_NAME, 'readwrite');
+        tx.objectStore(BIBLE_STORE_NAME).put(data, bookId);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch {
+      // best-effort; a failed offline save shouldn't break reading
     }
-    return list;
   }
 
-  static isChapterCached(chapterKey: string): boolean {
-    return this.getCachedChapters().includes(chapterKey);
+  static async isBookOfflineSaved(bookId: string): Promise<boolean> {
+    return (await this.getOfflineBook(bookId)) !== null;
   }
 
   static exportAllData(): SyncPayload {

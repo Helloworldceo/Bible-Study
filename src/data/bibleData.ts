@@ -1,4 +1,5 @@
 import { BibleBook, BibleVerse, ChapterContent } from '../types';
+import { StorageManager } from '../utils/offlineStorage';
 
 export const BIBLE_BOOKS: BibleBook[] = [
   // OLD TESTAMENT (ብሉይ ኪዳን / Ancien Testament)
@@ -224,18 +225,31 @@ interface RealBookFile { id: string; chapters: RealChapterRow[]; }
 
 const bookTextCache = new Map<string, Promise<RealBookFile>>();
 
-function loadBookText(bookId: string): Promise<RealBookFile> {
+/// Makes sure a book's real text is persisted for offline reading -- used
+/// by the reader's explicit "Save Offline" button. A no-op if it's already
+/// cached (loadBookText checks IndexedDB before touching the network).
+export async function ensureBookOffline(bookId: string): Promise<void> {
+  await loadBookText(bookId);
+}
+
+async function loadBookText(bookId: string): Promise<RealBookFile> {
   let pending = bookTextCache.get(bookId);
   if (!pending) {
-    pending = fetch(`/bible/${bookId}.json`)
-      .then(res => {
-        if (!res.ok) throw new Error(`HTTP ${res.status} loading ${bookId}`);
-        return res.json() as Promise<RealBookFile>;
-      })
-      .catch(err => {
-        bookTextCache.delete(bookId); // allow a retry on the next call instead of caching the failure
-        throw err;
-      });
+    pending = (async () => {
+      // 1. IndexedDB first -- works offline and survives reloads.
+      const offline = await StorageManager.getOfflineBook(bookId);
+      if (offline) return offline as RealBookFile;
+
+      // 2. Fall back to the network, then persist for next time (including offline).
+      const res = await fetch(`/bible/${bookId}.json`);
+      if (!res.ok) throw new Error(`HTTP ${res.status} loading ${bookId}`);
+      const data = (await res.json()) as RealBookFile;
+      void StorageManager.saveOfflineBook(bookId, data); // fire-and-forget
+      return data;
+    })().catch(err => {
+      bookTextCache.delete(bookId); // allow a retry on the next call instead of caching the failure
+      throw err;
+    });
     bookTextCache.set(bookId, pending);
   }
   return pending;

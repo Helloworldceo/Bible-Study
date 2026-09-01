@@ -4,6 +4,17 @@ import crypto from 'crypto';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
+import {
+  getUserByEmail,
+  getUserById,
+  createUser,
+  updateUserData,
+  createToken,
+  getUserIdByToken,
+  hashPassword,
+  verifyPassword,
+  seedDemoUserIfMissing,
+} from './db';
 
 dotenv.config();
 
@@ -32,37 +43,9 @@ function getGeminiClient(): GoogleGenAI {
   return aiClient;
 }
 
-// In-Memory Cloud Database for multi-device sync & auth
-interface StoredUser {
-  id: string;
-  email: string;
-  name: string;
-  passwordHash: string;
-  preferredLanguage: 'en' | 'am';
-  createdAt: string;
-  lastSyncedAt?: string;
-  data?: any;
-}
-
-const usersDb = new Map<string, StoredUser>();
-const tokensDb = new Map<string, string>(); // token -> userId
-
-// Seed a default demo user for instant multi-device demonstration
-const demoUserId = 'user-berean-demo';
-const demoHash = crypto.createHash('sha256').update('password123').digest('hex');
-usersDb.set('davidabdisa40@gmail.com', {
-  id: demoUserId,
-  email: 'davidabdisa40@gmail.com',
-  name: 'David Abdisa',
-  passwordHash: demoHash,
-  preferredLanguage: 'en',
-  createdAt: new Date().toISOString(),
-  lastSyncedAt: new Date().toISOString(),
-});
-
-function hashPassword(password: string): string {
-  return crypto.createHash('sha256').update(password).digest('hex');
-}
+// Persistent SQLite-backed store for multi-device sync & auth (data/berean.db)
+// -- see db.ts. Seed a default demo user for instant multi-device demonstration.
+seedDemoUserIfMissing();
 
 // Daily verses collection for Discord dispatch
 const DISCORD_VERSE_COLLECTION = [
@@ -111,23 +94,25 @@ app.post('/api/auth/register', (req, res) => {
       return res.status(400).json({ error: 'Email, password and name are required.' });
     }
     const normalizedEmail = email.toLowerCase().trim();
-    if (usersDb.has(normalizedEmail)) {
+    if (getUserByEmail(normalizedEmail)) {
       return res.status(400).json({ error: 'An account with this email already exists.' });
     }
 
-    const newUser: StoredUser = {
+    const { hash, salt } = hashPassword(password);
+    const newUser = {
       id: `user-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
       email: normalizedEmail,
       name: name.trim(),
-      passwordHash: hashPassword(password),
-      preferredLanguage: preferredLanguage || 'en',
+      passwordHash: hash,
+      passwordSalt: salt,
+      preferredLanguage: (preferredLanguage || 'en') as 'en' | 'am',
       createdAt: new Date().toISOString(),
       lastSyncedAt: new Date().toISOString(),
     };
 
-    usersDb.set(normalizedEmail, newUser);
+    createUser(newUser);
     const token = crypto.randomBytes(32).toString('hex');
-    tokensDb.set(token, newUser.id);
+    createToken(token, newUser.id);
 
     return res.json({
       token,
@@ -152,13 +137,13 @@ app.post('/api/auth/login', (req, res) => {
       return res.status(400).json({ error: 'Email and password are required.' });
     }
     const normalizedEmail = email.toLowerCase().trim();
-    const user = usersDb.get(normalizedEmail);
-    if (!user || user.passwordHash !== hashPassword(password)) {
+    const user = getUserByEmail(normalizedEmail);
+    if (!user || !verifyPassword(password, user.passwordHash, user.passwordSalt)) {
       return res.status(401).json({ error: 'Invalid email or password.' });
     }
 
     const token = crypto.randomBytes(32).toString('hex');
-    tokensDb.set(token, user.id);
+    createToken(token, user.id);
 
     return res.json({
       token,
@@ -180,11 +165,11 @@ app.post('/api/auth/login', (req, res) => {
 app.get('/api/auth/me', (req, res) => {
   const authHeader = req.headers.authorization;
   const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
-  if (!token || !tokensDb.has(token)) {
+  const userId = token ? getUserIdByToken(token) : undefined;
+  if (!userId) {
     return res.status(401).json({ error: 'Unauthorized or invalid token' });
   }
-  const userId = tokensDb.get(token);
-  const user = Array.from(usersDb.values()).find(u => u.id === userId);
+  const user = getUserById(userId);
   if (!user) {
     return res.status(404).json({ error: 'User not found' });
   }
@@ -212,12 +197,9 @@ app.post('/api/sync/push', (req, res) => {
       return res.status(400).json({ error: 'Missing sync payload.' });
     }
 
-    const userId = token ? tokensDb.get(token) : 'guest-sync-bucket';
-    const targetUser = Array.from(usersDb.values()).find(u => u.id === userId);
-
-    if (targetUser) {
-      targetUser.data = payload;
-      targetUser.lastSyncedAt = new Date().toISOString();
+    const userId = token ? getUserIdByToken(token) : undefined;
+    if (userId) {
+      updateUserData(userId, payload, new Date().toISOString());
     }
 
     return res.json({
@@ -234,8 +216,8 @@ app.get('/api/sync/pull', (req, res) => {
   try {
     const authHeader = req.headers.authorization;
     const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
-    const userId = token ? tokensDb.get(token) : null;
-    const targetUser = userId ? Array.from(usersDb.values()).find(u => u.id === userId) : null;
+    const userId = token ? getUserIdByToken(token) : undefined;
+    const targetUser = userId ? getUserById(userId) : undefined;
 
     return res.json({
       data: targetUser?.data || null,
