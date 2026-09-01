@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { X, Highlighter, Bookmark, FileText, Sparkles, Send, Copy, Volume2, Check, ExternalLink, BookOpen } from 'lucide-react';
+import { X, Highlighter, Bookmark, FileText, Sparkles, Send, Copy, Volume2, Check, ExternalLink, BookOpen, Play, Pause, Globe, Music } from 'lucide-react';
 import { BibleVerse, HighlightItem, Language } from '../types';
 import { useTranslation } from '../utils/translations';
 import { StorageManager } from '../utils/offlineStorage';
+import { audioReader, AudioLangMode } from '../utils/audioReaderService';
 
 interface VerseActionModalProps {
   verse: BibleVerse | null;
@@ -67,19 +68,8 @@ export const VerseActionModal: React.FC<VerseActionModalProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleSpeak = () => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const textToSpeak = lang === 'am' ? verse.textAm : verse.textEn;
-      const utterance = new SpeechSynthesisUtterance(textToSpeak);
-      utterance.rate = 0.9;
-      if (lang === 'am') {
-        utterance.lang = 'am-ET';
-      } else {
-        utterance.lang = 'en-US';
-      }
-      window.speechSynthesis.speak(utterance);
-    }
+  const handlePlayAudio = (mode: AudioLangMode) => {
+    audioReader.playVerse(verse, mode);
   };
 
   const fetchAIExplanation = async () => {
@@ -249,38 +239,75 @@ export const VerseActionModal: React.FC<VerseActionModalProps> = ({
               </div>
 
               {/* Action Buttons Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2">
+              <div className="grid grid-cols-2 gap-3 pt-2">
                 <button
                   onClick={() => onToggleBookmark(verse)}
-                  className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-1.5 text-xs font-medium transition-all ${
+                  className={`p-3 rounded-xl border flex items-center justify-center gap-2 text-xs font-medium transition-all ${
                     isBookmarked 
                       ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-400 text-amber-800 dark:text-amber-300 shadow-sm'
                       : 'border-stone-200 dark:border-stone-800 hover:bg-stone-50 dark:hover:bg-stone-800 text-stone-700 dark:text-stone-300'
                   }`}
                 >
-                  <Bookmark className={`w-5 h-5 ${isBookmarked ? 'fill-amber-500 text-amber-500' : 'text-stone-400'}`} />
+                  <Bookmark className={`w-4 h-4 ${isBookmarked ? 'fill-amber-500 text-amber-500' : 'text-stone-400'}`} />
                   <span>{isBookmarked ? 'Bookmarked' : 'Add Bookmark'}</span>
                 </button>
 
                 <button
-                  onClick={handleSpeak}
-                  className="p-3 rounded-xl border border-stone-200 dark:border-stone-800 hover:bg-stone-50 dark:hover:bg-stone-800 text-stone-700 dark:text-stone-300 flex flex-col items-center justify-center gap-1.5 text-xs font-medium transition-all"
-                >
-                  <Volume2 className="w-5 h-5 text-amber-600" />
-                  <span>Listen Aloud</span>
-                </button>
-
-                <button
                   onClick={() => handleCopy('both')}
-                  className="p-3 rounded-xl border border-stone-200 dark:border-stone-800 hover:bg-stone-50 dark:hover:bg-stone-800 text-stone-700 dark:text-stone-300 flex flex-col items-center justify-center gap-1.5 text-xs font-medium transition-all"
+                  className="p-3 rounded-xl border border-stone-200 dark:border-stone-800 hover:bg-stone-50 dark:hover:bg-stone-800 text-stone-700 dark:text-stone-300 flex items-center justify-center gap-2 text-xs font-medium transition-all"
                 >
-                  {copied ? <Check className="w-5 h-5 text-emerald-600" /> : <Copy className="w-5 h-5 text-stone-400" />}
+                  {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4 text-stone-400" />}
                   <span>{copied ? 'Copied Both!' : 'Copy Bilingual'}</span>
                 </button>
               </div>
 
+              {/* Audio Narrator Options */}
+              <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 space-y-2.5">
+                <div className="flex items-center justify-between text-xs font-semibold text-amber-900 dark:text-amber-300">
+                  <span className="flex items-center gap-1.5">
+                    <Volume2 className="w-4 h-4 text-amber-600" />
+                    <span>Audio Narrator • የድምጽ ንባብ</span>
+                  </span>
+                  <span className="text-[10px] font-mono opacity-80">AI HD / Native</span>
+                </div>
+                
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <button
+                    onClick={() => handlePlayAudio('fr')}
+                    className="p-2 rounded-xl bg-white dark:bg-stone-900 border border-amber-300 dark:border-stone-700 hover:border-amber-500 text-stone-800 dark:text-stone-200 text-xs font-medium flex items-center justify-center gap-1.5 shadow-sm transition-all hover:bg-amber-50 dark:hover:bg-stone-800"
+                  >
+                    <span>🇫🇷</span>
+                    <span className="font-semibold">Français</span>
+                  </button>
+
+                  <button
+                    onClick={() => handlePlayAudio('en')}
+                    className="p-2 rounded-xl bg-white dark:bg-stone-900 border border-amber-300 dark:border-stone-700 hover:border-amber-500 text-stone-800 dark:text-stone-200 text-xs font-medium flex items-center justify-center gap-1.5 shadow-sm transition-all hover:bg-amber-50 dark:hover:bg-stone-800"
+                  >
+                    <span>🇬🇧</span>
+                    <span className="font-semibold">English</span>
+                  </button>
+
+                  <button
+                    onClick={() => handlePlayAudio('am')}
+                    className="p-2 rounded-xl bg-white dark:bg-stone-900 border border-amber-300 dark:border-stone-700 hover:border-amber-500 text-stone-800 dark:text-stone-200 text-xs font-medium flex items-center justify-center gap-1.5 shadow-sm transition-all hover:bg-amber-50 dark:hover:bg-stone-800"
+                  >
+                    <span>🇪🇹</span>
+                    <span className="font-ethiopic font-semibold">አማርኛ</span>
+                  </button>
+
+                  <button
+                    onClick={() => handlePlayAudio('parallel')}
+                    className="p-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold flex items-center justify-center gap-1 shadow-sm transition-all"
+                  >
+                    <span>⚡</span>
+                    <span>Parallel</span>
+                  </button>
+                </div>
+              </div>
+
               {/* Copy Format Options */}
-              <div className="flex items-center gap-2 pt-2 text-xs text-stone-500 dark:text-stone-400">
+              <div className="flex items-center gap-2 pt-2 text-xs text-stone-500 dark:text-stone-400 flex-wrap">
                 <span>Copy Only:</span>
                 <button
                   onClick={() => handleCopy('en')}
@@ -294,6 +321,18 @@ export const VerseActionModal: React.FC<VerseActionModalProps> = ({
                 >
                   አማርኛ
                 </button>
+                {verse.textFr && (
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(`${verse.bookNameFr || verse.bookNameEn} ${verse.chapter}:${verse.verse}\n"${verse.textFr}"`);
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 2000);
+                    }}
+                    className="px-2 py-1 rounded bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-300 font-medium"
+                  >
+                    Français
+                  </button>
+                )}
               </div>
             </div>
           )}

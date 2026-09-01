@@ -127,15 +127,39 @@ export const Navbar: React.FC<NavbarProps> = ({
               {isOnline ? <Wifi className="w-3.5 h-3.5" /> : <WifiOff className="w-3.5 h-3.5" />}
             </div>
 
-            {/* Language Switcher */}
-            <button
-              id="language-toggle-btn"
-              onClick={() => setLang(lang === 'en' ? 'am' : 'en')}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-stone-800 hover:bg-stone-700 border border-stone-700 text-xs font-medium text-stone-200 transition-colors"
-            >
-              <Globe className="w-3.5 h-3.5 text-amber-400" />
-              <span>{lang === 'en' ? 'አማርኛ' : 'English'}</span>
-            </button>
+            {/* Language Switcher Dropdown / Cycling */}
+            <div className="flex items-center rounded-lg bg-stone-800 border border-stone-700 p-0.5 text-xs">
+              <button
+                id="lang-btn-en"
+                onClick={() => setLang('en')}
+                className={`px-2 py-1 rounded font-medium transition-colors ${
+                  lang === 'en' ? 'bg-amber-600 text-white font-semibold shadow-xs' : 'text-stone-300 hover:text-white'
+                }`}
+                title="English"
+              >
+                EN
+              </button>
+              <button
+                id="lang-btn-fr"
+                onClick={() => setLang('fr')}
+                className={`px-2 py-1 rounded font-medium transition-colors ${
+                  lang === 'fr' ? 'bg-amber-600 text-white font-semibold shadow-xs' : 'text-stone-300 hover:text-white'
+                }`}
+                title="Français"
+              >
+                FR
+              </button>
+              <button
+                id="lang-btn-am"
+                onClick={() => setLang('am')}
+                className={`px-2 py-1 rounded font-medium font-ethiopic transition-colors ${
+                  lang === 'am' ? 'bg-amber-600 text-white font-semibold shadow-xs' : 'text-stone-300 hover:text-white'
+                }`}
+                title="አማርኛ"
+              >
+                አማ
+              </button>
+            </div>
 
             {/* User Account / Sign In */}
             <button

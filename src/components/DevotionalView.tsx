@@ -2,12 +2,13 @@ import React, { useState } from 'react';
 import { 
   Sparkles, Calendar, BookOpen, Heart, Volume2, Share2, 
   Send, Check, ArrowRight, BookMarked, MessageSquare, Flame, 
-  ChevronLeft, ChevronRight, PenTool
+  ChevronLeft, ChevronRight, PenTool, Globe
 } from 'lucide-react';
 import { DailyDevotional, Language } from '../types';
 import { DEVOTIONALS_LIBRARY } from '../data/devotionalsData';
 import { useTranslation } from '../utils/translations';
 import { StorageManager } from '../utils/offlineStorage';
+import { audioReader, AudioLangMode } from '../utils/audioReaderService';
 
 interface DevotionalViewProps {
   lang: Language;
@@ -64,28 +65,24 @@ export const DevotionalView: React.FC<DevotionalViewProps> = ({
     }, 3000);
   };
 
-  const handleAudioSpeech = () => {
-    if (!('speechSynthesis' in window)) return;
+  const [isAudioMenuOpen, setIsAudioMenuOpen] = useState(false);
 
-    if (isPlayingAudio) {
-      window.speechSynthesis.cancel();
-      setIsPlayingAudio(false);
-      return;
-    }
+  const handleAudioSpeech = (mode: AudioLangMode) => {
+    setIsAudioMenuOpen(false);
+    
+    // Construct verse representation for the devotional scripture & text
+    const devotionalVerse = {
+      id: activeDevotional.id,
+      bookId: activeDevotional.scriptureBookId,
+      bookNameEn: activeDevotional.scriptureRefEn,
+      bookNameAm: activeDevotional.scriptureRefAm,
+      chapter: activeDevotional.scriptureChapter,
+      verse: 1,
+      textEn: `${activeDevotional.titleEn}. Scripture: "${activeDevotional.scriptureEn}" — ${activeDevotional.contentEn} Prayer: ${activeDevotional.prayerEn}`,
+      textAm: `${activeDevotional.titleAm}። የቅዱስ ቃል ንባብ፡ "${activeDevotional.scriptureAm}" — ${activeDevotional.contentAm} ጸሎት፡ ${activeDevotional.prayerAm}`
+    };
 
-    setIsPlayingAudio(true);
-    const content = lang === 'am'
-      ? `${activeDevotional.titleAm}. ${activeDevotional.scriptureAm}. ${activeDevotional.contentAm}. ጸሎት፡ ${activeDevotional.prayerAm}`
-      : `${activeDevotional.titleEn}. ${activeDevotional.scriptureEn}. ${activeDevotional.contentEn}. Prayer: ${activeDevotional.prayerEn}`;
-
-    const utterance = new SpeechSynthesisUtterance(content);
-    utterance.rate = 0.9;
-    if (lang === 'am') utterance.lang = 'am-ET';
-    else utterance.lang = 'en-US';
-
-    utterance.onend = () => setIsPlayingAudio(false);
-    utterance.onerror = () => setIsPlayingAudio(false);
-    window.speechSynthesis.speak(utterance);
+    audioReader.playVerse(devotionalVerse, mode);
   };
 
   const handleSendToDiscord = async () => {
@@ -172,18 +169,55 @@ export const DevotionalView: React.FC<DevotionalViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Audio speech button */}
-          <button
-            onClick={handleAudioSpeech}
-            className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-all ${
-              isPlayingAudio
-                ? 'bg-rose-100 dark:bg-rose-900/40 border-rose-400 text-rose-800 dark:text-rose-200 animate-pulse'
-                : 'bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 border-stone-200 dark:border-stone-700 text-stone-700 dark:text-stone-300'
-            }`}
-          >
-            <Volume2 className="w-4 h-4 text-amber-600" />
-            <span className="hidden sm:inline">{isPlayingAudio ? 'Stop Audio' : 'Listen'}</span>
-          </button>
+          {/* Audio speech button & dropdown */}
+          <div className="relative">
+            <div className="flex items-center rounded-xl bg-stone-100 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 overflow-hidden text-xs">
+              <button
+                onClick={() => handleAudioSpeech(lang === 'am' ? 'am' : 'en')}
+                className="px-2.5 py-1.5 flex items-center gap-1.5 font-semibold text-stone-700 dark:text-stone-300 hover:bg-stone-200 dark:hover:bg-stone-700 transition-colors"
+                title="Listen to Devotional"
+              >
+                <Volume2 className="w-4 h-4 text-amber-600" />
+                <span className="hidden sm:inline">Listen</span>
+              </button>
+              <button
+                onClick={() => setIsAudioMenuOpen(!isAudioMenuOpen)}
+                className="p-1.5 border-l border-stone-200 dark:border-stone-700 hover:bg-stone-200 dark:hover:bg-stone-700 text-stone-600 dark:text-stone-300"
+                title="Audio language options"
+              >
+                <Globe className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {isAudioMenuOpen && (
+              <div className="absolute right-0 mt-1.5 w-52 bg-white dark:bg-stone-900 rounded-2xl shadow-xl border border-stone-200 dark:border-stone-800 p-1.5 z-50 text-xs space-y-1 animate-in fade-in">
+                <button
+                  onClick={() => handleAudioSpeech('fr')}
+                  className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-amber-50 dark:hover:bg-stone-800 flex items-center justify-between text-stone-800 dark:text-stone-200"
+                >
+                  <span>🇫🇷 Écouter en Français</span>
+                </button>
+                <button
+                  onClick={() => handleAudioSpeech('en')}
+                  className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-amber-50 dark:hover:bg-stone-800 flex items-center justify-between text-stone-800 dark:text-stone-200"
+                >
+                  <span>🇬🇧 Listen in English</span>
+                </button>
+                <button
+                  onClick={() => handleAudioSpeech('am')}
+                  className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-amber-50 dark:hover:bg-stone-800 flex items-center justify-between text-stone-800 dark:text-stone-200"
+                >
+                  <span className="font-ethiopic">🇪🇹 በአማርኛ አድምጥ</span>
+                </button>
+                <button
+                  onClick={() => handleAudioSpeech('parallel')}
+                  className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-amber-50 dark:hover:bg-stone-800 flex items-center justify-between text-stone-800 dark:text-stone-200"
+                >
+                  <span>⚡ Parallel Mode</span>
+                </button>
+              </div>
+            )}
+          </div>
 
           {/* Send to Discord */}
           <button

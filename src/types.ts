@@ -1,14 +1,16 @@
-export type Language = 'en' | 'am';
+export type Language = 'en' | 'am' | 'fr';
 
 export interface BibleVerse {
   id: string; // e.g. "GEN.1.1"
   bookId: string; // "GEN"
   bookNameEn: string;
   bookNameAm: string;
+  bookNameFr?: string;
   chapter: number;
   verse: number;
   textEn: string;
   textAm: string;
+  textFr?: string;
   notes?: string;
   crossReferences?: string[];
 }
@@ -17,17 +19,20 @@ export interface BibleBook {
   id: string; // e.g. "GEN", "PSA", "MAT"
   nameEn: string;
   nameAm: string;
+  nameFr?: string;
   testament: 'OT' | 'NT';
   category: 'law' | 'history' | 'poetry' | 'major_prophets' | 'minor_prophets' | 'gospels' | 'acts' | 'epistles' | 'revelation';
   chaptersCount: number;
   descriptionEn: string;
   descriptionAm: string;
+  descriptionFr?: string;
 }
 
 export interface ChapterContent {
   bookId: string;
   bookNameEn: string;
   bookNameAm: string;
+  bookNameFr?: string;
   chapter: number;
   totalChapters: number;
   verses: BibleVerse[];

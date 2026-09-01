@@ -8,7 +8,7 @@ import { createServer as createViteServer } from 'vite';
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 app.use(express.json({ limit: '10mb' }));
 
@@ -493,6 +493,99 @@ If answering in Amharic, write in beautiful, respectful Amharic (መጽሐፍ �
     return res.json({
       success: true,
       answer: `Scripture reminds us: "All Scripture is given by inspiration of God, and is profitable for doctrine, for reproof, for correction, for instruction in righteousness." (2 Timothy 3:16 / 2ኛ ጢሞቴዎስ 3:16). Continue seeking wisdom through prayer, fellowship, and diligent meditation on God's Word.`
+    });
+  }
+});
+
+// --- AUDIO TEXT-TO-SPEECH (TTS) API (AMHARIC & ENGLISH) ---
+function pcmToWavBuffer(pcmBuffer: Buffer, sampleRate = 24000, numChannels = 1, bitsPerSample = 16): Buffer {
+  const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
+  const blockAlign = numChannels * (bitsPerSample / 8);
+  const dataSize = pcmBuffer.length;
+  const headerSize = 44;
+  const totalSize = headerSize + dataSize;
+  const buffer = Buffer.alloc(totalSize);
+
+  // RIFF chunk descriptor
+  buffer.write('RIFF', 0);
+  buffer.writeUInt32LE(totalSize - 8, 4);
+  buffer.write('WAVE', 8);
+
+  // fmt sub-chunk
+  buffer.write('fmt ', 12);
+  buffer.writeUInt32LE(16, 16); // Subchunk1Size for PCM
+  buffer.writeUInt16LE(1, 20); // AudioFormat: 1 (PCM)
+  buffer.writeUInt16LE(numChannels, 22);
+  buffer.writeUInt32LE(sampleRate, 24);
+  buffer.writeUInt32LE(byteRate, 28);
+  buffer.writeUInt16LE(blockAlign, 32);
+  buffer.writeUInt16LE(bitsPerSample, 34);
+
+  // data sub-chunk
+  buffer.write('data', 36);
+  buffer.writeUInt32LE(dataSize, 40);
+
+  // copy raw PCM data
+  pcmBuffer.copy(buffer, 44);
+
+  return buffer;
+}
+
+app.post('/api/audio/tts', async (req, res) => {
+  try {
+    const { text, lang = 'en', voice = 'Kore' } = req.body;
+    if (!text || typeof text !== 'string') {
+      return res.status(400).json({ error: 'Text is required.' });
+    }
+
+    const gemini = getGeminiClient();
+    const validVoices = ['Kore', 'Puck', 'Charon', 'Fenrir', 'Zephyr'];
+    const chosenVoice = validVoices.includes(voice) ? voice : (lang === 'am' ? 'Fenrir' : 'Kore');
+
+    let promptText = text;
+    if (lang === 'am') {
+      promptText = `Read this Holy Bible Scripture in authentic, clear, reverent Amharic (አማርኛ) with natural Ethiopian cadence:\n\n${text}`;
+    } else if (lang === 'fr') {
+      promptText = `Read this Holy Scripture in fluent, reverent, and clear French (Français) with natural, peaceful phrasing:\n\n${text}`;
+    } else {
+      promptText = `Read this Holy Scripture clearly, with a peaceful, reverent, and uplifting tone:\n\n${text}`;
+    }
+
+    const response = await gemini.models.generateContent({
+      model: 'gemini-3.1-flash-tts-preview',
+      contents: [{ parts: [{ text: promptText }] }],
+      config: {
+        responseModalities: ['AUDIO'],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: chosenVoice },
+          },
+        },
+      },
+    });
+
+    const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    if (!base64Audio) {
+      return res.status(500).json({ error: 'No audio data returned from TTS engine.', fallbackToBrowser: true });
+    }
+
+    const pcmBuffer = Buffer.from(base64Audio, 'base64');
+    const wavBuffer = pcmToWavBuffer(pcmBuffer, 24000, 1, 16);
+    const wavBase64 = wavBuffer.toString('base64');
+
+    return res.json({
+      success: true,
+      audioBase64: wavBase64,
+      mimeType: 'audio/wav',
+      sampleRate: 24000,
+      voice: chosenVoice,
+      lang: lang
+    });
+  } catch (err: any) {
+    console.error('TTS Generation Error:', err);
+    return res.status(500).json({ 
+      error: err.message || 'TTS generation failed', 
+      fallbackToBrowser: true 
     });
   }
 });

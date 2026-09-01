@@ -2,12 +2,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   BookOpen, Search, ChevronLeft, ChevronRight, Bookmark, 
   Volume2, VolumeX, Download, Check, Settings, Sparkles, 
-  Columns2, Rows, Maximize2, Minimize2, BookmarkCheck, FileText, ArrowRight
+  Columns2, Rows, Maximize2, Minimize2, BookmarkCheck, FileText, ArrowRight,
+  Play, Pause, Globe, Music
 } from 'lucide-react';
 import { BibleBook, BibleVerse, ChapterContent, HighlightItem, Language } from '../types';
 import { BIBLE_BOOKS, getChapterContent } from '../data/bibleData';
 import { useTranslation } from '../utils/translations';
 import { StorageManager } from '../utils/offlineStorage';
+import { audioReader, AudioPlaybackState, AudioLangMode } from '../utils/audioReaderService';
 
 interface BibleReaderProps {
   lang: Language;
@@ -35,19 +37,38 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
   const t = useTranslation(lang);
 
   // Reader Settings
-  const [viewMode, setViewMode] = useState<'parallel' | 'en' | 'am'>('parallel');
+  const [viewMode, setViewMode] = useState<'parallel' | 'en' | 'fr' | 'am'>('parallel');
   const [fontSize, setFontSize] = useState<'sm' | 'md' | 'lg' | 'xl'>('md');
   const [readingTheme, setReadingTheme] = useState<'parchment' | 'sepia' | 'dark'>('parchment');
   const [isBookSelectorOpen, setIsBookSelectorOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeSpeakingVerseId, setActiveSpeakingVerseId] = useState<string | null>(null);
-  const [isSpeakingAll, setIsSpeakingAll] = useState(false);
   const [isOfflineSaved, setIsOfflineSaved] = useState(false);
+  const [isAudioMenuOpen, setIsAudioMenuOpen] = useState(false);
+  const [playbackState, setPlaybackState] = useState<AudioPlaybackState>(audioReader.getState());
+  const [activeVerseAudioMenuId, setActiveVerseAudioMenuId] = useState<string | null>(null);
 
   const activeBook = BIBLE_BOOKS.find(b => b.id === selectedBookId) || BIBLE_BOOKS[0];
   const chapterData: ChapterContent = getChapterContent(activeBook.id, selectedChapter);
-
   const chapterKey = `${activeBook.id}.${selectedChapter}`;
+
+  // Subscribe to central audio reader state
+  useEffect(() => {
+    const unsubscribe = audioReader.subscribe((state) => {
+      setPlaybackState(state);
+      
+      // Auto-scroll active verse into view if it changes
+      if (state.isPlaying && state.currentVerseId && state.currentVerseId !== 'custom') {
+        const verseEl = document.getElementById(`verse-${state.currentVerseId}`);
+        if (verseEl) {
+          verseEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     setIsOfflineSaved(StorageManager.isChapterCached(chapterKey));
@@ -120,66 +141,33 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
     }
   };
 
-  // Audio Speech Synthesis for the Chapter
-  const toggleSpeechChapter = () => {
-    if (!('speechSynthesis' in window)) return;
-
-    if (isSpeakingAll) {
-      window.speechSynthesis.cancel();
-      setIsSpeakingAll(false);
-      setActiveSpeakingVerseId(null);
-      return;
-    }
-
-    setIsSpeakingAll(true);
-    let verseIndex = 0;
-
-    const speakNextVerse = () => {
-      if (verseIndex >= chapterData.verses.length) {
-        setIsSpeakingAll(false);
-        setActiveSpeakingVerseId(null);
-        return;
-      }
-
-      const currentV = chapterData.verses[verseIndex];
-      setActiveSpeakingVerseId(currentV.id);
-
-      const text = viewMode === 'am' || (viewMode === 'parallel' && lang === 'am') 
-        ? currentV.textAm 
-        : currentV.textEn;
-
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 0.9;
-      if (viewMode === 'am' || (viewMode === 'parallel' && lang === 'am')) {
-        utterance.lang = 'am-ET';
-      } else {
-        utterance.lang = 'en-US';
-      }
-
-      utterance.onend = () => {
-        verseIndex++;
-        speakNextVerse();
-      };
-
-      utterance.onerror = () => {
-        setIsSpeakingAll(false);
-        setActiveSpeakingVerseId(null);
-      };
-
-      window.speechSynthesis.speak(utterance);
-    };
-
-    speakNextVerse();
+  // Audio Playback Triggers
+  const handlePlayChapter = (mode: AudioLangMode) => {
+    setIsAudioMenuOpen(false);
+    audioReader.playChapter(
+      chapterData.verses,
+      0,
+      mode,
+      `${activeBook.nameEn} ${selectedChapter} • ${activeBook.nameAm} ${selectedChapter}`
+    );
   };
 
-  // Stop audio on unmount
-  useEffect(() => {
-    return () => {
-      if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-      }
-    };
-  }, []);
+  const handlePlaySingleVerse = (verse: BibleVerse, mode: AudioLangMode, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setActiveVerseAudioMenuId(null);
+    audioReader.playVerse(verse, mode);
+  };
+
+  const handleTogglePlayState = () => {
+    if (playbackState.isPlaying) {
+      audioReader.pause();
+    } else if (playbackState.isPaused) {
+      audioReader.resume();
+    } else {
+      const defaultMode: AudioLangMode = viewMode === 'am' ? 'am' : viewMode === 'en' ? 'en' : 'parallel';
+      handlePlayChapter(defaultMode);
+    }
+  };
 
   // Filter books for selector
   const filteredBooks = BIBLE_BOOKS.filter(b => 
@@ -187,6 +175,8 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
     b.nameAm.includes(searchQuery) ||
     b.id.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const isCurrentChapterPlaying = playbackState.isPlaying && chapterData.verses.some(v => v.id === playbackState.currentVerseId);
 
   return (
     <div className={`min-h-[calc(100vh-5rem)] ${getContainerBg()} transition-colors pb-16`}>
@@ -260,6 +250,16 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
                 EN
               </button>
               <button
+                onClick={() => setViewMode('fr')}
+                className={`px-2 py-1 rounded-lg font-medium transition-all ${
+                  viewMode === 'fr'
+                    ? 'bg-amber-600 text-white shadow-sm font-semibold'
+                    : 'text-stone-600 dark:text-stone-400 hover:text-stone-900'
+                }`}
+              >
+                FR
+              </button>
+              <button
                 onClick={() => setViewMode('am')}
                 className={`px-2 py-1 rounded-lg font-medium font-ethiopic transition-all ${
                   viewMode === 'am'
@@ -305,19 +305,79 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
               />
             </div>
 
-            {/* Audio Recitation */}
-            <button
-              onClick={toggleSpeechChapter}
-              className={`p-2 rounded-xl border text-xs flex items-center gap-1.5 font-medium transition-all ${
-                isSpeakingAll 
-                  ? 'bg-rose-100 dark:bg-rose-900/50 border-rose-400 text-rose-800 dark:text-rose-200 animate-pulse'
-                  : 'bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 border-stone-200 dark:border-stone-700 text-stone-700 dark:text-stone-300'
-              }`}
-              title={isSpeakingAll ? t.stopAudio : t.listenAudio}
-            >
-              {isSpeakingAll ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4 text-amber-600" />}
-              <span className="hidden md:inline">{isSpeakingAll ? t.stopAudio : t.listenAudio}</span>
-            </button>
+            {/* Audio Recitation Toolbar Controller & Menu */}
+            <div className="relative">
+              <div className="flex items-center rounded-xl bg-stone-100 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 overflow-hidden text-xs">
+                <button
+                  onClick={handleTogglePlayState}
+                  className={`px-2.5 py-1.5 flex items-center gap-1.5 font-medium transition-all ${
+                    isCurrentChapterPlaying
+                      ? 'bg-amber-600 text-white font-semibold shadow-sm'
+                      : 'hover:bg-stone-200 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-300'
+                  }`}
+                  title={isCurrentChapterPlaying ? 'Pause Audio' : 'Play Chapter Audio'}
+                >
+                  {isCurrentChapterPlaying ? (
+                    <>
+                      <Pause className="w-3.5 h-3.5 fill-current" />
+                      <span className="hidden md:inline">Playing</span>
+                    </>
+                  ) : (
+                    <>
+                      <Volume2 className="w-3.5 h-3.5 text-amber-600" />
+                      <span className="hidden md:inline">{t.listenChapter}</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  onClick={() => setIsAudioMenuOpen(!isAudioMenuOpen)}
+                  className="p-1.5 border-l border-stone-200 dark:border-stone-700 hover:bg-stone-200 dark:hover:bg-stone-700 text-stone-600 dark:text-stone-300"
+                  title="Choose Audio Language"
+                >
+                  <Globe className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Audio Dropdown Menu */}
+              {isAudioMenuOpen && (
+                <div className="absolute right-0 mt-1.5 w-64 bg-white dark:bg-stone-900 rounded-2xl shadow-xl border border-stone-200 dark:border-stone-800 p-2 z-50 text-xs space-y-1 animate-in fade-in">
+                  <div className="px-2 py-1 text-[11px] font-bold text-stone-400 uppercase tracking-wider">
+                    {lang === 'am' ? 'የድምጽ ንባብ ቋንቋ ምረጥ' : 'Select Audio Narration'}
+                  </div>
+                  <button
+                    onClick={() => handlePlayChapter('am')}
+                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-amber-50 dark:hover:bg-stone-800 flex items-center justify-between text-stone-800 dark:text-stone-200 font-medium"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span>🇪🇹</span>
+                      <span className="font-ethiopic">አማርኛ ብቻ (Amharic)</span>
+                    </span>
+                    <Volume2 className="w-3.5 h-3.5 text-amber-600" />
+                  </button>
+                  <button
+                    onClick={() => handlePlayChapter('en')}
+                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-amber-50 dark:hover:bg-stone-800 flex items-center justify-between text-stone-800 dark:text-stone-200 font-medium"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span>🇬🇧</span>
+                      <span>English Only</span>
+                    </span>
+                    <Volume2 className="w-3.5 h-3.5 text-amber-600" />
+                  </button>
+                  <button
+                    onClick={() => handlePlayChapter('parallel')}
+                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-amber-50 dark:hover:bg-stone-800 flex items-center justify-between text-stone-800 dark:text-stone-200 font-medium"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span>⚡</span>
+                      <span>Parallel (EN + አማርኛ)</span>
+                    </span>
+                    <Volume2 className="w-3.5 h-3.5 text-amber-600" />
+                  </button>
+                </div>
+              )}
+            </div>
 
             {/* Offline Cache Button */}
             <button
@@ -488,7 +548,8 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
             const isHighlighted = highlights.find(h => h.verseId === verse.id);
             const isBookmarked = bookmarkedVerseIds.includes(verse.id);
             const hasNote = notesVerseIds.includes(verse.id);
-            const isSpeaking = activeSpeakingVerseId === verse.id;
+            const isSpeaking = playbackState.currentVerseId === verse.id && (playbackState.isPlaying || playbackState.isPaused);
+            const isMenuOpen = activeVerseAudioMenuId === verse.id;
 
             // Highlight style mapping
             let highlightClass = '';
@@ -507,14 +568,66 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
                 key={verse.id}
                 id={`verse-${verse.id}`}
                 onClick={() => onSelectVerse(verse)}
-                className={`group relative p-3 rounded-xl border transition-all cursor-pointer ${
+                className={`group relative p-3.5 rounded-xl border transition-all cursor-pointer ${
                   isSpeaking
-                    ? 'border-amber-500 bg-amber-50/80 dark:bg-amber-950/40 ring-2 ring-amber-400/50'
+                    ? 'border-amber-500 bg-amber-500/10 ring-2 ring-amber-400/60 shadow-md'
                     : 'border-transparent hover:border-amber-300 dark:hover:border-amber-700/60 hover:bg-amber-50/30 dark:hover:bg-stone-800/40'
                 }`}
               >
-                {/* Verse Indicators (Bookmark flag, Note badge) */}
+                {/* Verse Indicators & Quick Actions */}
                 <div className="absolute right-3 top-3 flex items-center gap-1.5 opacity-80 group-hover:opacity-100 transition-opacity">
+                  {/* Live Soundwave when reciting */}
+                  {isSpeaking && (
+                    <div className="flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-bold shadow-sm animate-pulse mr-1">
+                      <span className="w-1 h-2.5 bg-white rounded-full animate-bounce"></span>
+                      <span className="w-1 h-3.5 bg-white rounded-full animate-bounce delay-75"></span>
+                      <span className="w-1 h-2 bg-white rounded-full animate-bounce delay-150"></span>
+                      <span className="ml-1 uppercase tracking-wider">{playbackState.isPlaying ? 'Reading' : 'Paused'}</span>
+                    </div>
+                  )}
+
+                  {/* Audio Trigger for this specific verse */}
+                  <div className="relative" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveVerseAudioMenuId(isMenuOpen ? null : verse.id);
+                      }}
+                      className={`p-1.5 rounded-lg border text-xs transition-all ${
+                        isSpeaking
+                          ? 'bg-amber-600 text-white border-amber-600'
+                          : 'bg-white/80 dark:bg-stone-800/80 hover:bg-amber-100 dark:hover:bg-stone-700 border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-300'
+                      }`}
+                      title="Listen to this verse"
+                    >
+                      <Volume2 className="w-3.5 h-3.5" />
+                    </button>
+
+                    {/* Verse Audio Popover Menu */}
+                    {isMenuOpen && (
+                      <div className="absolute right-0 mt-1 w-52 bg-white dark:bg-stone-900 rounded-xl shadow-xl border border-stone-200 dark:border-stone-800 p-1.5 z-50 text-xs space-y-1 animate-in fade-in">
+                        <button
+                          onClick={(e) => handlePlaySingleVerse(verse, 'am', e)}
+                          className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-amber-50 dark:hover:bg-stone-800 flex items-center justify-between text-stone-800 dark:text-stone-200"
+                        >
+                          <span className="font-ethiopic">🇪🇹 በአማርኛ አድምጥ</span>
+                        </button>
+                        <button
+                          onClick={(e) => handlePlaySingleVerse(verse, 'en', e)}
+                          className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-amber-50 dark:hover:bg-stone-800 flex items-center justify-between text-stone-800 dark:text-stone-200"
+                        >
+                          <span>🇬🇧 Listen in English</span>
+                        </button>
+                        <button
+                          onClick={(e) => handlePlaySingleVerse(verse, 'parallel', e)}
+                          className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-amber-50 dark:hover:bg-stone-800 flex items-center justify-between text-stone-800 dark:text-stone-200"
+                        >
+                          <span>⚡ Bilingual (EN + AM)</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
                   {isBookmarked && (
                     <span title="Bookmarked">
                       <Bookmark className="w-4 h-4 fill-amber-500 text-amber-500" />
@@ -567,6 +680,15 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
                     </span>
                     <p className={`font-serif-bible ${getFontSizeClass()} ${highlightClass}`}>
                       {verse.textEn}
+                    </p>
+                  </div>
+                ) : viewMode === 'fr' ? (
+                  <div className="flex items-start gap-3">
+                    <span className="font-serif-bible font-bold text-amber-700 dark:text-amber-400 text-sm select-none shrink-0 pt-0.5">
+                      {verse.verse}
+                    </span>
+                    <p className={`font-serif-bible ${getFontSizeClass()} ${highlightClass}`}>
+                      {verse.textFr || verse.textEn}
                     </p>
                   </div>
                 ) : (
