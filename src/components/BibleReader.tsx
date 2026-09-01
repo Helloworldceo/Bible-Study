@@ -3,7 +3,7 @@ import {
   BookOpen, Search, ChevronLeft, ChevronRight, Bookmark, 
   Volume2, VolumeX, Download, Check, Settings, Sparkles, 
   Columns2, Rows, Maximize2, Minimize2, BookmarkCheck, FileText, ArrowRight,
-  Play, Pause, Globe, Music, Eye
+  Pause, Globe, Music, Eye
 } from 'lucide-react';
 import { BibleBook, BibleVerse, ChapterContent, HighlightItem, Language } from '../types';
 import { BIBLE_BOOKS, fetchChapterContent, ensureBookOffline } from '../data/bibleData';
@@ -42,10 +42,16 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
   const [readingTheme, setReadingTheme] = useState<'parchment' | 'sepia' | 'dark'>('parchment');
   const [isBookSelectorOpen, setIsBookSelectorOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  // Book picker wizard: books -> chapters (for pickerBookId) -> verses (for
+  // pickerChapter, optional). Null pickerBookId means "showing the books list".
+  const [pickerBookId, setPickerBookId] = useState<string | null>(null);
+  const [pickerChapter, setPickerChapter] = useState<number | null>(null);
+  const [pickerVerseCount, setPickerVerseCount] = useState<number | null>(null);
+  const [pickerVerseLoading, setPickerVerseLoading] = useState(false);
+  const [pendingScrollVerseId, setPendingScrollVerseId] = useState<string | null>(null);
   const [isOfflineSaved, setIsOfflineSaved] = useState(false);
   const [isAudioMenuOpen, setIsAudioMenuOpen] = useState(false);
   const [playbackState, setPlaybackState] = useState<AudioPlaybackState>(audioReader.getState());
-  const [activeVerseAudioMenuId, setActiveVerseAudioMenuId] = useState<string | null>(null);
   const [autoScrollWithAudio, setAutoScrollWithAudio] = useState(true);
 
   const activeBook = BIBLE_BOOKS.find(b => b.id === selectedBookId) || BIBLE_BOOKS[0];
@@ -78,6 +84,39 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
       cancelled = true;
     };
   }, [activeBook.id, selectedChapter]);
+
+  // Book picker, verse step: fetch the real verse count for the chapter
+  // being previewed (this also warms fetchChapterContent's cache, so the
+  // chapter loads instantly once the user actually commits to it below).
+  useEffect(() => {
+    if (!pickerBookId || pickerChapter === null) {
+      setPickerVerseCount(null);
+      return;
+    }
+    let cancelled = false;
+    setPickerVerseLoading(true);
+    setPickerVerseCount(null);
+    fetchChapterContent(pickerBookId, pickerChapter).then((data) => {
+      if (!cancelled) {
+        setPickerVerseCount(data.verses.length);
+        setPickerVerseLoading(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [pickerBookId, pickerChapter]);
+
+  // Once the picker jumps to a specific verse, scroll it into view as soon
+  // as that verse actually shows up in the loaded chapter.
+  useEffect(() => {
+    if (!pendingScrollVerseId) return;
+    const found = chapterData.verses.some(v => v.id === pendingScrollVerseId);
+    if (!found) return;
+    const el = document.getElementById(`verse-${pendingScrollVerseId}`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setPendingScrollVerseId(null);
+  }, [chapterData, pendingScrollVerseId]);
 
   // Subscribe to central audio reader state
   useEffect(() => {
@@ -178,6 +217,19 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
     }
   };
 
+  // Commits the book picker's choice and closes it -- verse is optional
+  // (picking a chapter alone just opens it at verse 1; picking a verse too
+  // scrolls to it once that chapter's loaded, see the effect above).
+  const jumpToReading = (bookId: string, chapter: number, verse?: number) => {
+    setSelectedBookId(bookId);
+    setSelectedChapter(chapter);
+    setIsBookSelectorOpen(false);
+    setPickerBookId(null);
+    setPickerChapter(null);
+    setPendingScrollVerseId(verse ? `${bookId}.${chapter}.${verse}` : null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   // Audio Playback Triggers
   const handlePlayChapter = (mode: AudioLangMode, engine: 'wordproject' | 'ai' = 'wordproject') => {
     setIsAudioMenuOpen(false);
@@ -191,43 +243,6 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
         chapterData.verses,
         0,
         mode,
-        `${activeBook.nameEn} ${selectedChapter} • ${activeBook.nameAm} ${selectedChapter}`
-      );
-    }
-  };
-
-  const handlePlaySingleVerse = (verse: BibleVerse, mode: AudioLangMode, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setActiveVerseAudioMenuId(null);
-    audioReader.playVerse(verse, mode);
-  };
-
-  const handlePlayFromVerse = (verse: BibleVerse, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setActiveVerseAudioMenuId(null);
-    const verseIndex = chapterData.verses.findIndex(v => v.id === verse.id);
-    const targetIndex = verseIndex >= 0 ? verseIndex : 0;
-    
-    // If chapter audio is already loaded/playing for this chapter, seek directly
-    if (playbackState.isWordProjectAudio && playbackState.currentBookId === activeBook.id && playbackState.currentChapter === selectedChapter) {
-      audioReader.seekToVerse(targetIndex);
-      if (!playbackState.isPlaying) {
-        audioReader.resume();
-      }
-      return;
-    }
-
-    const defaultMode: AudioLangMode = viewMode === 'parallel' ? 'parallel' : viewMode;
-    const targetLang: 'am' | 'en' | 'fr' = (viewMode === 'en' || viewMode === 'fr') ? viewMode : 'am';
-    const bookName = targetLang === 'am' ? activeBook.nameAm : (targetLang === 'fr' ? (activeBook.nameFr || activeBook.nameEn) : activeBook.nameEn);
-    
-    if (playbackState.engine === 'wordproject') {
-      audioReader.playWordProjectChapter(activeBook.id, selectedChapter, targetLang, bookName, chapterData.verses, targetIndex);
-    } else {
-      audioReader.playChapter(
-        chapterData.verses,
-        targetIndex,
-        defaultMode,
         `${activeBook.nameEn} ${selectedChapter} • ${activeBook.nameAm} ${selectedChapter}`
       );
     }
@@ -555,118 +570,178 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 animate-in fade-in">
           <div className="bg-white dark:bg-stone-900 w-full max-w-4xl rounded-2xl shadow-2xl border border-stone-200 dark:border-stone-800 max-h-[85vh] flex flex-col overflow-hidden">
             
-            {/* Selector Header & Search */}
+            {/* Selector Header & Search (books step only) */}
             <div className="p-4 sm:p-5 border-b border-stone-200 dark:border-stone-800 flex items-center justify-between gap-4 bg-stone-50 dark:bg-stone-800/80">
-              <div className="flex-1 max-w-md relative">
-                <Search className="w-4 h-4 absolute left-3 top-3 text-stone-400" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder={t.searchScripture}
-                  className="w-full pl-9 pr-4 py-2 rounded-xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 text-sm focus:ring-2 focus:ring-amber-500 outline-none"
-                />
-              </div>
+              {!pickerBookId ? (
+                <div className="flex-1 max-w-md relative">
+                  <Search className="w-4 h-4 absolute left-3 top-3 text-stone-400" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder={t.searchScripture}
+                    className="w-full pl-9 pr-4 py-2 rounded-xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 text-sm focus:ring-2 focus:ring-amber-500 outline-none"
+                  />
+                </div>
+              ) : (
+                <button
+                  onClick={() => (pickerChapter !== null ? setPickerChapter(null) : setPickerBookId(null))}
+                  className="flex items-center gap-1 text-sm font-semibold text-amber-700 dark:text-amber-400 hover:underline"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  {pickerChapter !== null
+                    ? (lang === 'am' ? 'ወደ ምዕራፎች ተመለስ' : lang === 'fr' ? 'Retour aux chapitres' : 'Back to chapters')
+                    : (lang === 'am' ? 'ወደ መጻሕፍት ተመለስ' : lang === 'fr' ? 'Retour aux livres' : 'Back to books')}
+                </button>
+              )}
               <button
-                onClick={() => setIsBookSelectorOpen(false)}
+                onClick={() => {
+                  setIsBookSelectorOpen(false);
+                  setPickerBookId(null);
+                  setPickerChapter(null);
+                }}
                 className="px-4 py-2 rounded-xl bg-stone-200 dark:bg-stone-700 text-stone-700 dark:text-stone-200 text-xs font-semibold hover:bg-stone-300 transition-colors"
               >
                 Close
               </button>
             </div>
 
-            {/* Books & Chapters List */}
-            <div className="p-4 sm:p-6 overflow-y-auto flex-1 grid grid-cols-1 md:grid-cols-2 gap-6">
-              
-              {/* Old Testament (ብሉይ ኪዳን) */}
-              <div>
-                <div className="flex items-center gap-2 pb-2 mb-3 border-b border-amber-500/30">
-                  <span className="font-cinzel font-bold text-amber-800 dark:text-amber-400 text-sm">
-                    OLD TESTAMENT
-                  </span>
-                  <span className="font-ethiopic text-xs text-stone-500">
-                    (ብሉይ ኪዳን - 39 Books)
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  {filteredBooks.filter(b => b.testament === 'OT').map((b) => (
-                    <button
-                      key={b.id}
-                      onClick={() => {
-                        setSelectedBookId(b.id);
-                        setSelectedChapter(1);
-                        setIsBookSelectorOpen(false);
-                      }}
-                      className={`p-2 rounded-xl border text-left text-xs transition-all ${
-                        selectedBookId === b.id
-                          ? 'bg-amber-600 text-white border-amber-600 font-semibold shadow'
-                          : 'border-stone-200 dark:border-stone-800 hover:bg-amber-50/60 dark:hover:bg-stone-800/80 text-stone-800 dark:text-stone-200'
-                      }`}
-                    >
-                      <div className="font-medium">{b.nameEn}</div>
-                      <div className="font-ethiopic text-[11px] opacity-80">{b.nameAm}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
+            <div className="p-4 sm:p-6 overflow-y-auto flex-1">
 
-              {/* New Testament (ሐዲስ ኪዳን) */}
-              <div>
-                <div className="flex items-center gap-2 pb-2 mb-3 border-b border-amber-500/30">
-                  <span className="font-cinzel font-bold text-amber-800 dark:text-amber-400 text-sm">
-                    NEW TESTAMENT
-                  </span>
-                  <span className="font-ethiopic text-xs text-stone-500">
-                    (ሐዲስ ኪዳን - 27 Books)
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  {filteredBooks.filter(b => b.testament === 'NT').map((b) => (
-                    <button
-                      key={b.id}
-                      onClick={() => {
-                        setSelectedBookId(b.id);
-                        setSelectedChapter(1);
-                        setIsBookSelectorOpen(false);
-                      }}
-                      className={`p-2 rounded-xl border text-left text-xs transition-all ${
-                        selectedBookId === b.id
-                          ? 'bg-amber-600 text-white border-amber-600 font-semibold shadow'
-                          : 'border-stone-200 dark:border-stone-800 hover:bg-amber-50/60 dark:hover:bg-stone-800/80 text-stone-800 dark:text-stone-200'
-                      }`}
-                    >
-                      <div className="font-medium">{b.nameEn}</div>
-                      <div className="font-ethiopic text-[11px] opacity-80">{b.nameAm}</div>
-                    </button>
-                  ))}
-                </div>
-
-                {/* Chapter Selector Grid for Selected Book */}
-                <div className="mt-6 pt-4 border-t border-stone-200 dark:border-stone-800">
-                  <div className="text-xs font-semibold text-stone-500 dark:text-stone-400 uppercase tracking-wider mb-2">
-                    Jump to Chapter in {activeBook.nameEn}:
+              {/* Step 1: Books */}
+              {!pickerBookId && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <div className="flex items-center gap-2 pb-2 mb-3 border-b border-amber-500/30">
+                      <span className="font-cinzel font-bold text-amber-800 dark:text-amber-400 text-sm">
+                        OLD TESTAMENT
+                      </span>
+                      <span className="font-ethiopic text-xs text-stone-500">
+                        (ብሉይ ኪዳን - 39 Books)
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {filteredBooks.filter(b => b.testament === 'OT').map((b) => (
+                        <button
+                          key={b.id}
+                          onClick={() => setPickerBookId(b.id)}
+                          className={`p-2 rounded-xl border text-left text-xs transition-all ${
+                            selectedBookId === b.id
+                              ? 'bg-amber-600 text-white border-amber-600 font-semibold shadow'
+                              : 'border-stone-200 dark:border-stone-800 hover:bg-amber-50/60 dark:hover:bg-stone-800/80 text-stone-800 dark:text-stone-200'
+                          }`}
+                        >
+                          <div className="font-medium">{b.nameEn}</div>
+                          <div className="font-ethiopic text-[11px] opacity-80">{b.nameAm}</div>
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto p-1">
-                    {Array.from({ length: activeBook.chaptersCount }, (_, i) => i + 1).map((ch) => (
-                      <button
-                        key={ch}
-                        onClick={() => {
-                          setSelectedChapter(ch);
-                          setIsBookSelectorOpen(false);
-                        }}
-                        className={`w-9 h-9 rounded-lg font-semibold text-xs transition-all ${
-                          selectedChapter === ch
-                            ? 'bg-amber-600 text-white shadow'
-                            : 'bg-stone-100 dark:bg-stone-800 hover:bg-amber-100 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-300'
-                        }`}
-                      >
-                        {ch}
-                      </button>
-                    ))}
+
+                  <div>
+                    <div className="flex items-center gap-2 pb-2 mb-3 border-b border-amber-500/30">
+                      <span className="font-cinzel font-bold text-amber-800 dark:text-amber-400 text-sm">
+                        NEW TESTAMENT
+                      </span>
+                      <span className="font-ethiopic text-xs text-stone-500">
+                        (ሐዲስ ኪዳን - 27 Books)
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {filteredBooks.filter(b => b.testament === 'NT').map((b) => (
+                        <button
+                          key={b.id}
+                          onClick={() => setPickerBookId(b.id)}
+                          className={`p-2 rounded-xl border text-left text-xs transition-all ${
+                            selectedBookId === b.id
+                              ? 'bg-amber-600 text-white border-amber-600 font-semibold shadow'
+                              : 'border-stone-200 dark:border-stone-800 hover:bg-amber-50/60 dark:hover:bg-stone-800/80 text-stone-800 dark:text-stone-200'
+                          }`}
+                        >
+                          <div className="font-medium">{b.nameEn}</div>
+                          <div className="font-ethiopic text-[11px] opacity-80">{b.nameAm}</div>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
+              )}
 
-              </div>
+              {/* Step 2: Chapters (for pickerBookId) */}
+              {pickerBookId && pickerChapter === null && (() => {
+                const pickerBook = BIBLE_BOOKS.find(b => b.id === pickerBookId) || BIBLE_BOOKS[0];
+                return (
+                  <div>
+                    <div className="mb-4">
+                      <div className="font-cinzel font-bold text-lg text-stone-900 dark:text-stone-100">{pickerBook.nameEn}</div>
+                      <div className="font-ethiopic text-sm text-stone-500">{pickerBook.nameAm}</div>
+                    </div>
+                    <div className="text-xs font-semibold text-stone-500 dark:text-stone-400 uppercase tracking-wider mb-2">
+                      {lang === 'am' ? 'ምዕራፍ ይምረጡ' : lang === 'fr' ? 'Choisissez un chapitre' : 'Choose a chapter'} ({pickerBook.chaptersCount})
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 max-h-96 overflow-y-auto p-1">
+                      {Array.from({ length: pickerBook.chaptersCount }, (_, i) => i + 1).map((ch) => (
+                        <button
+                          key={ch}
+                          onClick={() => setPickerChapter(ch)}
+                          className={`w-10 h-10 rounded-lg font-semibold text-xs transition-all ${
+                            selectedBookId === pickerBookId && selectedChapter === ch
+                              ? 'bg-amber-600 text-white shadow'
+                              : 'bg-stone-100 dark:bg-stone-800 hover:bg-amber-100 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-300'
+                          }`}
+                        >
+                          {ch}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Step 3: Verses (optional, for pickerChapter) */}
+              {pickerBookId && pickerChapter !== null && (() => {
+                const pickerBook = BIBLE_BOOKS.find(b => b.id === pickerBookId) || BIBLE_BOOKS[0];
+                return (
+                  <div>
+                    <div className="mb-4">
+                      <div className="font-cinzel font-bold text-lg text-stone-900 dark:text-stone-100">
+                        {pickerBook.nameEn} {pickerChapter}
+                      </div>
+                      <div className="font-ethiopic text-sm text-stone-500">{pickerBook.nameAm} {pickerChapter}</div>
+                    </div>
+                    <button
+                      onClick={() => jumpToReading(pickerBookId, pickerChapter)}
+                      className="w-full mb-5 px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold shadow transition-colors"
+                    >
+                      {lang === 'am'
+                        ? `ምዕራፍ ${pickerChapter}ን ጀምር`
+                        : lang === 'fr'
+                          ? `Commencer au chapitre ${pickerChapter}`
+                          : `Start reading at chapter ${pickerChapter}`}
+                    </button>
+                    <div className="text-xs font-semibold text-stone-500 dark:text-stone-400 uppercase tracking-wider mb-2">
+                      {lang === 'am' ? 'ወይም ወደ ተወሰነ ቁጥር ይዝለሉ (አማራጭ)' : lang === 'fr' ? 'Ou allez à un verset précis (optionnel)' : 'Or jump to a specific verse (optional)'}
+                    </div>
+                    {pickerVerseLoading ? (
+                      <div className="text-xs text-stone-400 py-6 text-center animate-pulse">
+                        {lang === 'am' ? 'ቁጥሮች እየጫኑ ነው...' : lang === 'fr' ? 'Chargement des versets…' : 'Loading verses…'}
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5 max-h-72 overflow-y-auto p-1">
+                        {Array.from({ length: pickerVerseCount || 0 }, (_, i) => i + 1).map((v) => (
+                          <button
+                            key={v}
+                            onClick={() => jumpToReading(pickerBookId, pickerChapter, v)}
+                            className="w-9 h-9 rounded-lg font-semibold text-xs bg-stone-100 dark:bg-stone-800 hover:bg-amber-100 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-300 transition-all"
+                          >
+                            {v}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
             </div>
 
@@ -705,7 +780,6 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
             const isBookmarked = bookmarkedVerseIds.includes(verse.id);
             const hasNote = notesVerseIds.includes(verse.id);
             const isSpeaking = playbackState.currentVerseId === verse.id && (playbackState.isPlaying || playbackState.isPaused);
-            const isMenuOpen = activeVerseAudioMenuId === verse.id;
 
             // Highlight style mapping
             let highlightClass = '';
@@ -741,60 +815,6 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
                       <span className="ml-1 uppercase tracking-wider">{playbackState.isPlaying ? 'Reading' : 'Paused'}</span>
                     </div>
                   )}
-
-                  {/* Audio Trigger for this specific verse */}
-                  <div className="relative" onClick={(e) => e.stopPropagation()}>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setActiveVerseAudioMenuId(isMenuOpen ? null : verse.id);
-                      }}
-                      className={`p-1.5 rounded-lg border text-xs transition-all ${
-                        isSpeaking
-                          ? 'bg-amber-600 text-white border-amber-600'
-                          : 'bg-white/80 dark:bg-stone-800/80 hover:bg-amber-100 dark:hover:bg-stone-700 border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-300'
-                      }`}
-                      title="Listen to this verse"
-                    >
-                      <Volume2 className="w-3.5 h-3.5" />
-                    </button>
-
-                    {/* Verse Audio Popover Menu */}
-                    {isMenuOpen && (
-                      <div className="absolute right-0 mt-1 w-60 bg-white dark:bg-stone-900 rounded-xl shadow-xl border border-stone-200 dark:border-stone-800 p-1.5 z-50 text-xs space-y-1 animate-in fade-in">
-                        <div className="px-2 py-1 text-[10px] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider border-b border-stone-100 dark:border-stone-800">
-                          Verse {verse.verse} Audio
-                        </div>
-                        <button
-                          onClick={(e) => handlePlayFromVerse(verse, e)}
-                          className="w-full text-left px-2.5 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 flex items-center justify-between text-amber-900 dark:text-amber-200 font-semibold"
-                        >
-                          <span className="flex items-center gap-1.5">
-                            <Play className="w-3.5 h-3.5 fill-current" />
-                            <span>{lang === 'am' ? 'ከዚህ ቁጥር ጀምሮ አድምጥ' : 'Play audio from this verse'}</span>
-                          </span>
-                        </button>
-                        <button
-                          onClick={(e) => handlePlaySingleVerse(verse, 'am', e)}
-                          className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-amber-50 dark:hover:bg-stone-800 flex items-center justify-between text-stone-800 dark:text-stone-200"
-                        >
-                          <span className="font-ethiopic">🇪🇹 በአማርኛ አድምጥ</span>
-                        </button>
-                        <button
-                          onClick={(e) => handlePlaySingleVerse(verse, 'en', e)}
-                          className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-amber-50 dark:hover:bg-stone-800 flex items-center justify-between text-stone-800 dark:text-stone-200"
-                        >
-                          <span>🇬🇧 Listen in English</span>
-                        </button>
-                        <button
-                          onClick={(e) => handlePlaySingleVerse(verse, 'parallel', e)}
-                          className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-amber-50 dark:hover:bg-stone-800 flex items-center justify-between text-stone-800 dark:text-stone-200"
-                        >
-                          <span>⚡ Bilingual (EN + AM)</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
 
                   {isBookmarked && (
                     <span title="Bookmarked">
