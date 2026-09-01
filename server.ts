@@ -3,7 +3,11 @@ import path from 'path';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
-import { createServer as createViteServer } from 'vite';
+// vite is imported dynamically below, dev-branch only -- a static top-level
+// import here loads vite (and its Rollup dependency, which carries a
+// platform-specific native binary) unconditionally, which crashes on
+// Vercel's Lambda runtime even though this codepath never actually runs
+// there (NODE_ENV is always 'production' on Vercel).
 import {
   initDb,
   getUserByEmail,
@@ -15,7 +19,7 @@ import {
   hashPassword,
   verifyPassword,
   seedDemoUserIfMissing,
-} from './db';
+} from './db.js'; // see the note in api/index.ts on why this extension is required
 
 dotenv.config();
 
@@ -649,12 +653,19 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Vite Middleware for development & Static Serving for production
+// Vite Middleware for development & Static Serving for production.
+// On Vercel, this file runs as a serverless function (see api/index.ts)
+// that only ever receives /api/* requests -- vercel.json routes everything
+// else straight to the static build, and Vercel's own filesystem hosting
+// serves it, so there's no static-file-serving or app.listen() to do here.
 async function startServer() {
   await initDb();
   await seedDemoUserIfMissing();
 
+  if (process.env.VERCEL) return;
+
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -673,4 +684,16 @@ async function startServer() {
   });
 }
 
-startServer();
+// Kicked off once per cold start; every invocation awaits it before Express
+// touches a request, so init (DB schema + demo seed) can't race a request
+// that arrives before it finishes.
+const ready = startServer();
+
+// Untyped req/res here deliberately: Express's app is callable as a plain
+// (req, res) Node request handler, which is also exactly what Vercel's
+// Node runtime invokes this with -- Express's own Request/Response types
+// describe the *typed* API surface inside route handlers, not this signature.
+export default async function handler(req: any, res: any) {
+  await ready;
+  return app(req, res);
+}

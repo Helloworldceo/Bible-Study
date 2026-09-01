@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "api/index.ts": {
+      "includeFiles": "{server.ts,db.ts}"
+    }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api" }
+  ]
+}
