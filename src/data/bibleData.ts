@@ -209,7 +209,78 @@ export const CURATED_CHAPTERS_MAP: Record<string, BibleVerse[]> = {
   ]
 };
 
-// Intelligent Scripture Engine to retrieve any Chapter in all 66 books
+// --- Real scripture text (KJV / Louis Segond 1910 / traditional Amharic) ---
+// Bundled as static per-book JSON under public/bible/<BookId>.json rather
+// than in this module, since the full text runs ~15MB across 66 books --
+// far too large to bundle into the JS build. fetchChapterContent() is the
+// function every reader should call; getChapterContent() below is a
+// synchronous FALLBACK ONLY, used when the real text can't be loaded (e.g.
+// no network and nothing cached yet) -- its output is generated filler
+// text, not actual scripture, and must never be presented as such.
+
+interface RealVerseRow { v: number; en: string; fr: string; am: string; }
+interface RealChapterRow { c: number; verses: RealVerseRow[]; }
+interface RealBookFile { id: string; chapters: RealChapterRow[]; }
+
+const bookTextCache = new Map<string, Promise<RealBookFile>>();
+
+function loadBookText(bookId: string): Promise<RealBookFile> {
+  let pending = bookTextCache.get(bookId);
+  if (!pending) {
+    pending = fetch(`/bible/${bookId}.json`)
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status} loading ${bookId}`);
+        return res.json() as Promise<RealBookFile>;
+      })
+      .catch(err => {
+        bookTextCache.delete(bookId); // allow a retry on the next call instead of caching the failure
+        throw err;
+      });
+    bookTextCache.set(bookId, pending);
+  }
+  return pending;
+}
+
+/// Fetches real, public-domain scripture text for one chapter: King James
+/// Version (English), Louis Segond 1910 (French), and the traditional
+/// Amharic Bible (as published by wordproject.org -- the same source this
+/// app already uses for Amharic audio). Falls back to getChapterContent()'s
+/// generated filler text only if the real data can't be loaded.
+export async function fetchChapterContent(bookId: string, chapterNumber: number): Promise<ChapterContent> {
+  const book = BIBLE_BOOKS.find(b => b.id === bookId) || BIBLE_BOOKS[0];
+  try {
+    const bookText = await loadBookText(book.id);
+    const chapter = bookText.chapters.find(c => c.c === chapterNumber);
+    if (!chapter) throw new Error(`Chapter ${chapterNumber} not found in ${book.id}`);
+
+    return {
+      bookId: book.id,
+      bookNameEn: book.nameEn,
+      bookNameAm: book.nameAm,
+      bookNameFr: book.nameFr || book.nameEn,
+      chapter: chapterNumber,
+      totalChapters: book.chaptersCount,
+      verses: chapter.verses.map((v): BibleVerse => ({
+        id: `${book.id}.${chapterNumber}.${v.v}`,
+        bookId: book.id,
+        bookNameEn: book.nameEn,
+        bookNameAm: book.nameAm,
+        bookNameFr: book.nameFr || book.nameEn,
+        chapter: chapterNumber,
+        verse: v.v,
+        textEn: v.en,
+        textAm: v.am,
+        textFr: v.fr,
+      })),
+    };
+  } catch (err) {
+    console.warn(`[bibleData] Real text unavailable for ${bookId} ${chapterNumber}, using placeholder text:`, err);
+    return getChapterContent(bookId, chapterNumber);
+  }
+}
+
+// Fallback-only generator -- see the note above. Do not call this directly
+// from UI code; use fetchChapterContent().
 export function getChapterContent(bookId: string, chapterNumber: number): ChapterContent {
   const book = BIBLE_BOOKS.find(b => b.id === bookId) || BIBLE_BOOKS[0];
   const key = `${book.id}.${chapterNumber}`;

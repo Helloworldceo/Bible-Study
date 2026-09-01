@@ -6,7 +6,7 @@ import {
   Play, Pause, Globe, Music, Eye
 } from 'lucide-react';
 import { BibleBook, BibleVerse, ChapterContent, HighlightItem, Language } from '../types';
-import { BIBLE_BOOKS, getChapterContent } from '../data/bibleData';
+import { BIBLE_BOOKS, fetchChapterContent } from '../data/bibleData';
 import { useTranslation } from '../utils/translations';
 import { StorageManager } from '../utils/offlineStorage';
 import { audioReader, AudioPlaybackState, AudioLangMode } from '../utils/audioReaderService';
@@ -49,8 +49,36 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
   const [autoScrollWithAudio, setAutoScrollWithAudio] = useState(true);
 
   const activeBook = BIBLE_BOOKS.find(b => b.id === selectedBookId) || BIBLE_BOOKS[0];
-  const chapterData: ChapterContent = getChapterContent(activeBook.id, selectedChapter);
   const chapterKey = `${activeBook.id}.${selectedChapter}`;
+
+  // Chapter text loads asynchronously now (real scripture is fetched from
+  // /bible/<BookId>.json rather than bundled) -- start with an empty shell
+  // so every existing `chapterData.verses` usage below stays valid during
+  // the brief loading window instead of needing null-guards everywhere.
+  const [chapterData, setChapterData] = useState<ChapterContent>({
+    bookId: activeBook.id,
+    bookNameEn: activeBook.nameEn,
+    bookNameAm: activeBook.nameAm,
+    bookNameFr: activeBook.nameFr,
+    chapter: selectedChapter,
+    totalChapters: activeBook.chaptersCount,
+    verses: [],
+  });
+  const [isChapterLoading, setIsChapterLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsChapterLoading(true);
+    fetchChapterContent(activeBook.id, selectedChapter).then((data) => {
+      if (!cancelled) {
+        setChapterData(data);
+        setIsChapterLoading(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeBook.id, selectedChapter]);
 
   // Subscribe to central audio reader state
   useEffect(() => {
@@ -659,6 +687,11 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
 
         {/* Verses Container */}
         <div className={`rounded-2xl p-4 sm:p-8 shadow-sm border ${getThemeClass()} transition-all space-y-5`}>
+          {isChapterLoading && chapterData.verses.length === 0 && (
+            <div className="py-10 text-center text-sm text-stone-400 animate-pulse">
+              {lang === 'am' ? 'እየጫነ ነው...' : lang === 'fr' ? 'Chargement…' : 'Loading chapter…'}
+            </div>
+          )}
           {chapterData.verses.map((verse) => {
             const isHighlighted = highlights.find(h => h.verseId === verse.id);
             const isBookmarked = bookmarkedVerseIds.includes(verse.id);
