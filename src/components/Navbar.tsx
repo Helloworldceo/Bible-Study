@@ -1,11 +1,11 @@
 import React from 'react';
-import { BookOpen, Sparkles, Calendar, BookHeart, MessageSquare, Bot, Brain, Globe, Shield, RefreshCw, Wifi, WifiOff, Flame, User } from 'lucide-react';
+import { BookOpen, Sparkles, Calendar, BookHeart, MessageSquare, Bot, Brain, Users, Globe, Shield, RefreshCw, Wifi, WifiOff, Flame, User } from 'lucide-react';
 import { Language, UserProfile } from '../types';
 import { useTranslation } from '../utils/translations';
 
 interface NavbarProps {
-  currentTab: 'bible' | 'devotionals' | 'plans' | 'journal' | 'quiz' | 'discord' | 'ai';
-  setCurrentTab: (tab: 'bible' | 'devotionals' | 'plans' | 'journal' | 'quiz' | 'discord' | 'ai') => void;
+  currentTab: 'bible' | 'devotionals' | 'plans' | 'journal' | 'quiz' | 'friends' | 'discord' | 'ai';
+  setCurrentTab: (tab: 'bible' | 'devotionals' | 'plans' | 'journal' | 'quiz' | 'friends' | 'discord' | 'ai') => void;
   lang: Language;
   setLang: (lang: Language) => void;
   isOnline: boolean;
@@ -40,6 +40,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'plans', label: t.tabPlans, icon: Calendar },
     { id: 'journal', label: t.tabJournal, icon: BookHeart },
     { id: 'quiz', label: t.tabQuiz, icon: Brain },
+    { id: 'friends', label: t.tabFriends, icon: Users },
     ...(user?.isAdmin ? [{ id: 'discord', label: t.tabDiscord, icon: MessageSquare }] as const : []),
     { id: 'ai', label: t.tabAICompanion, icon: Bot },
   ] as const;

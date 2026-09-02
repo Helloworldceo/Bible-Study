@@ -14,6 +14,7 @@ export const translations = {
     tabDiscord: 'Discord Bot Hub',
     tabAICompanion: 'AI Study Assistant',
     tabQuiz: 'Bible Quiz',
+    tabFriends: 'Friends',
     
     // Auth & Status
     signIn: 'Sign In',
@@ -159,6 +160,7 @@ export const translations = {
     tabDiscord: 'የዲስኮርድ ቦት (Discord Bot)',
     tabAICompanion: 'የመጽሐፍ ቅዱስ AI ረዳት',
     tabQuiz: 'የመጽሐፍ ቅዱስ ጥያቄዎች',
+    tabFriends: 'ጓደኞች',
     
     // Auth & Status
     signIn: 'ግባ',
@@ -304,6 +306,7 @@ export const translations = {
     tabDiscord: 'Bot Discord',
     tabAICompanion: 'Assistant Biblique IA',
     tabQuiz: 'Quiz Biblique',
+    tabFriends: 'Amis',
     
     // Auth & Status
     signIn: 'Se Connecter',

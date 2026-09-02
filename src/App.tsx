@@ -7,6 +7,7 @@ import { ReflectionsPrayerJournal } from './components/ReflectionsPrayerJournal'
 import { DiscordBotHub } from './components/DiscordBotHub';
 import { AIStudyCompanion } from './components/AIStudyCompanion';
 import { BibleQuiz } from './components/BibleQuiz';
+import { FriendsHub } from './components/FriendsHub';
 import { VerseActionModal } from './components/VerseActionModal';
 import { AuthModal } from './components/AuthModal';
 import { AudioPlayerBar } from './components/AudioPlayerBar';
@@ -22,7 +23,7 @@ import { useTranslation } from './utils/translations';
 
 export const App: React.FC = () => {
   // Navigation & Language
-  const [currentTab, setCurrentTab] = useState<'bible' | 'devotionals' | 'plans' | 'journal' | 'quiz' | 'discord' | 'ai'>('bible');
+  const [currentTab, setCurrentTab] = useState<'bible' | 'devotionals' | 'plans' | 'journal' | 'quiz' | 'friends' | 'discord' | 'ai'>('bible');
   const [lang, setLang] = useState<Language>(() => {
     const saved = localStorage.getItem('berean_app_lang_v1');
     return (saved === 'am' ? 'am' : 'en') as Language;
@@ -259,6 +260,12 @@ export const App: React.FC = () => {
     handleCloudSync();
   };
 
+  // The server is the source of truth for username uniqueness -- this just
+  // reflects what it already accepted back into local user state.
+  const handleUsernameSet = (username: string) => {
+    setUser((prev) => (prev ? { ...prev, username } : prev));
+  };
+
   const handleSaveCustomPlan = (plan: StudyPlan) => {
     const updated = StorageManager.saveCustomPlan(plan);
     setCustomPlans([...updated]);
@@ -401,6 +408,12 @@ export const App: React.FC = () => {
         onOpenAuth={() => setIsAuthModalOpen(true)}
       />
 
+      {/* "Add to Home Screen" / "Install" prompt for the PWA -- sits in
+          normal document flow right below the header so it pushes page
+          content down instead of floating over it (a fixed-position
+          version collided with every tab's own colored hero banner). */}
+      <InstallPrompt lang={lang} />
+
       {/* Main View Router */}
       <div className="flex-1">
         {currentTab === 'bible' && (
@@ -494,6 +507,15 @@ export const App: React.FC = () => {
           />
         )}
 
+        {currentTab === 'friends' && (
+          <FriendsHub
+            lang={lang}
+            user={user}
+            onOpenAuth={() => setIsAuthModalOpen(true)}
+            onUsernameSet={handleUsernameSet}
+          />
+        )}
+
         {currentTab === 'discord' && user?.isAdmin && (
           <DiscordBotHub
             lang={lang}
@@ -554,9 +576,6 @@ export const App: React.FC = () => {
 
       {/* Floating Audio Player & Narrator Controller */}
       <AudioPlayerBar appLang={lang} />
-
-      {/* "Add to Home Screen" / "Install" prompt for the PWA */}
-      <InstallPrompt lang={lang} />
 
       {/* Global Minimal Footer */}
       <footer className="py-6 px-4 border-t border-stone-200 dark:border-stone-800 bg-white/60 dark:bg-stone-900/60 backdrop-blur-sm text-center text-xs text-stone-500 space-y-1">

@@ -65,8 +65,8 @@ export const InstallPrompt: React.FC<{ lang: Language }> = ({ lang }) => {
   if (dismissed || (!deferredPrompt && !showIosTip)) return null;
 
   return (
-    <div className="fixed top-32 sm:top-36 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-md animate-in fade-in">
-      <div className="flex items-start gap-3 p-4 rounded-2xl bg-stone-900 text-stone-100 border border-stone-700 shadow-2xl">
+    <div className="px-4 sm:px-6 pt-3 max-w-3xl mx-auto animate-in fade-in">
+      <div className="flex items-start gap-3 p-4 rounded-2xl bg-stone-900 text-stone-100 border border-stone-700 shadow-lg">
         <div className="w-9 h-9 rounded-xl shrink-0 overflow-hidden">
           <img src="/favicon.svg" alt="" className="w-full h-full" />
         </div>

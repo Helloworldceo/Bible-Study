@@ -232,6 +232,7 @@ export interface UserProfile {
   lastSyncedAt?: string;
   isGuest?: boolean;
   isAdmin?: boolean;
+  username?: string;
 }
 
 export interface SyncPayload {

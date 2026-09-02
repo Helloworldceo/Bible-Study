@@ -14,6 +14,9 @@ export interface StoredUser {
   createdAt: string;
   lastSyncedAt?: string;
   data?: any;
+  // Absent for accounts created before the Friends feature -- they choose
+  // one the first time they open it.
+  username?: string;
 }
 
 // Lazy, like getGeminiClient() in server.ts -- module-level imports resolve
@@ -59,6 +62,9 @@ export async function initDb(): Promise<void> {
   await getSql()`ALTER TABLE users ALTER COLUMN password_salt DROP NOT NULL`;
   await getSql()`ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id TEXT UNIQUE`;
   await getSql()`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false`;
+  // Nullable: existing accounts predate usernames and pick one the first
+  // time they open Friends; new registrations set it immediately.
+  await getSql()`ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT UNIQUE`;
   await getSql()`
     CREATE TABLE IF NOT EXISTS tokens (
       token TEXT PRIMARY KEY,
@@ -93,6 +99,19 @@ export async function initDb(): Promise<void> {
       error_message TEXT
     )
   `;
+  // A single row per request; once accepted, that same row *is* the
+  // friendship (no separate friends table) -- "are these two friends" is
+  // just "is there an accepted row between them in either direction".
+  await getSql()`
+    CREATE TABLE IF NOT EXISTS friend_requests (
+      id SERIAL PRIMARY KEY,
+      from_user_id TEXT NOT NULL REFERENCES users(id),
+      to_user_id TEXT NOT NULL REFERENCES users(id),
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      responded_at TIMESTAMPTZ
+    )
+  `;
 }
 
 // --- Password hashing (salted scrypt -- the original code used unsalted
@@ -125,6 +144,7 @@ interface UserRow {
   created_at: string;
   last_synced_at: string | null;
   data: unknown | null;
+  username: string | null;
 }
 
 function rowToUser(row: UserRow): StoredUser {
@@ -140,6 +160,7 @@ function rowToUser(row: UserRow): StoredUser {
     createdAt: row.created_at,
     lastSyncedAt: row.last_synced_at ?? undefined,
     data: row.data ?? undefined, // JSONB comes back already parsed
+    username: row.username ?? undefined,
   };
 }
 
@@ -169,9 +190,18 @@ export async function getUserCount(): Promise<number> {
 
 export async function createUser(user: StoredUser): Promise<void> {
   await getSql()`
-    INSERT INTO users (id, email, name, password_hash, password_salt, google_id, is_admin, preferred_language, created_at, last_synced_at, data)
-    VALUES (${user.id}, ${user.email}, ${user.name}, ${user.passwordHash ?? null}, ${user.passwordSalt ?? null}, ${user.googleId ?? null}, ${user.isAdmin}, ${user.preferredLanguage}, ${user.createdAt}, ${user.lastSyncedAt ?? null}, ${user.data ? JSON.stringify(user.data) : null})
+    INSERT INTO users (id, email, name, password_hash, password_salt, google_id, is_admin, preferred_language, created_at, last_synced_at, data, username)
+    VALUES (${user.id}, ${user.email}, ${user.name}, ${user.passwordHash ?? null}, ${user.passwordSalt ?? null}, ${user.googleId ?? null}, ${user.isAdmin}, ${user.preferredLanguage}, ${user.createdAt}, ${user.lastSyncedAt ?? null}, ${user.data ? JSON.stringify(user.data) : null}, ${user.username ?? null})
   `;
+}
+
+export async function getUserByUsername(username: string): Promise<StoredUser | undefined> {
+  const rows = (await getSql()`SELECT * FROM users WHERE username = ${username}`) as UserRow[];
+  return rows[0] ? rowToUser(rows[0]) : undefined;
+}
+
+export async function setUsername(userId: string, username: string): Promise<void> {
+  await getSql()`UPDATE users SET username = ${username} WHERE id = ${userId}`;
 }
 
 // Links a Google identity to an existing email/password account the first
@@ -287,4 +317,106 @@ export async function hasSuccessfulDeliveryToday(): Promise<boolean> {
     LIMIT 1
   `) as unknown[];
   return rows.length > 0;
+}
+
+// --- Friends: mutual friend requests + streak-with-a-friend ---
+// No separate "friendships" table -- an accepted row in friend_requests
+// *is* the friendship, checked in either direction.
+
+export interface FriendRequestSummary {
+  requestId: number;
+  userId: string;
+  username: string;
+  name: string;
+  createdAt: string;
+}
+
+export interface FriendSummary {
+  userId: string;
+  username: string;
+  name: string;
+  readingDates: string[];
+  streakDays: number;
+  since: string;
+}
+
+// Any existing row between the two users, pending or accepted, in either
+// direction -- callers use this to stop duplicate requests and to block
+// re-requesting someone you're already friends with.
+export async function getExistingRequestBetween(userA: string, userB: string): Promise<{ id: number; status: string } | undefined> {
+  const rows = (await getSql()`
+    SELECT id, status FROM friend_requests
+    WHERE (from_user_id = ${userA} AND to_user_id = ${userB})
+       OR (from_user_id = ${userB} AND to_user_id = ${userA})
+    ORDER BY created_at DESC
+    LIMIT 1
+  `) as { id: number; status: string }[];
+  return rows[0];
+}
+
+export async function createFriendRequest(fromUserId: string, toUserId: string): Promise<void> {
+  await getSql()`INSERT INTO friend_requests (from_user_id, to_user_id) VALUES (${fromUserId}, ${toUserId})`;
+}
+
+export async function getIncomingRequests(userId: string): Promise<FriendRequestSummary[]> {
+  const rows = (await getSql()`
+    SELECT fr.id AS request_id, u.id AS user_id, u.username, u.name, fr.created_at
+    FROM friend_requests fr
+    JOIN users u ON u.id = fr.from_user_id
+    WHERE fr.to_user_id = ${userId} AND fr.status = 'pending'
+    ORDER BY fr.created_at DESC
+  `) as { request_id: number; user_id: string; username: string; name: string; created_at: string }[];
+  return rows.map((r) => ({ requestId: r.request_id, userId: r.user_id, username: r.username, name: r.name, createdAt: r.created_at }));
+}
+
+export async function getOutgoingRequests(userId: string): Promise<FriendRequestSummary[]> {
+  const rows = (await getSql()`
+    SELECT fr.id AS request_id, u.id AS user_id, u.username, u.name, fr.created_at
+    FROM friend_requests fr
+    JOIN users u ON u.id = fr.to_user_id
+    WHERE fr.from_user_id = ${userId} AND fr.status = 'pending'
+    ORDER BY fr.created_at DESC
+  `) as { request_id: number; user_id: string; username: string; name: string; created_at: string }[];
+  return rows.map((r) => ({ requestId: r.request_id, userId: r.user_id, username: r.username, name: r.name, createdAt: r.created_at }));
+}
+
+// Returns the row so the caller can confirm the responding user was really
+// the addressee before treating it as authorized.
+export async function respondToFriendRequest(requestId: number, respondingUserId: string, accept: boolean): Promise<{ id: number; from_user_id: string; to_user_id: string } | undefined> {
+  const rows = (await getSql()`
+    UPDATE friend_requests
+    SET status = ${accept ? 'accepted' : 'declined'}, responded_at = now()
+    WHERE id = ${requestId} AND to_user_id = ${respondingUserId} AND status = 'pending'
+    RETURNING id, from_user_id, to_user_id
+  `) as { id: number; from_user_id: string; to_user_id: string }[];
+  return rows[0];
+}
+
+export async function getFriends(userId: string): Promise<FriendSummary[]> {
+  const rows = (await getSql()`
+    SELECT
+      u.id AS user_id, u.username, u.name, u.data,
+      fr.responded_at AS since
+    FROM friend_requests fr
+    JOIN users u ON u.id = CASE WHEN fr.from_user_id = ${userId} THEN fr.to_user_id ELSE fr.from_user_id END
+    WHERE (fr.from_user_id = ${userId} OR fr.to_user_id = ${userId}) AND fr.status = 'accepted'
+    ORDER BY fr.responded_at DESC
+  `) as { user_id: string; username: string; name: string; data: any; since: string }[];
+  return rows.map((r) => ({
+    userId: r.user_id,
+    username: r.username,
+    name: r.name,
+    readingDates: r.data?.stats?.readingDates ?? [],
+    streakDays: r.data?.stats?.streakDays ?? 0,
+    since: r.since,
+  }));
+}
+
+export async function removeFriendship(userId: string, friendId: string): Promise<void> {
+  await getSql()`
+    DELETE FROM friend_requests
+    WHERE status = 'accepted'
+      AND ((from_user_id = ${userId} AND to_user_id = ${friendId})
+        OR (from_user_id = ${friendId} AND to_user_id = ${userId}))
+  `;
 }

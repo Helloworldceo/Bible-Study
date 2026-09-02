@@ -14,6 +14,8 @@ import {
   getUserByEmail,
   getUserById,
   getUserByGoogleId,
+  getUserByUsername,
+  setUsername,
   getUserCount,
   createUser,
   linkGoogleAccount,
@@ -27,6 +29,13 @@ import {
   logDiscordDelivery,
   getRecentDiscordDeliveries,
   hasSuccessfulDeliveryToday,
+  getExistingRequestBetween,
+  createFriendRequest,
+  getIncomingRequests,
+  getOutgoingRequests,
+  respondToFriendRequest,
+  getFriends,
+  removeFriendship,
   type StoredUser,
   type DiscordConfig,
 } from './db.js'; // see the note in api/index.ts on why this extension is required
@@ -116,6 +125,7 @@ function toPublicUser(user: StoredUser) {
     createdAt: user.createdAt,
     lastSyncedAt: user.lastSyncedAt,
     isAdmin: user.isAdmin,
+    username: user.username,
   };
 }
 
@@ -335,6 +345,150 @@ app.get('/api/sync/pull', async (req, res) => {
     });
   } catch (err: any) {
     return res.status(500).json({ error: err.message || 'Pull sync failed' });
+  }
+});
+
+// --- FRIENDS: usernames, requests, and the streak-with-a-friend ---
+
+const USERNAME_PATTERN = /^[a-z][a-z0-9_]{2,19}$/;
+
+app.post('/api/username', requireAuth, async (req, res) => {
+  try {
+    const raw = String(req.body.username || '').trim().toLowerCase();
+    if (!USERNAME_PATTERN.test(raw)) {
+      return res.status(400).json({ error: 'Usernames are 3-20 characters, start with a letter, and use only lowercase letters, numbers, and underscores.' });
+    }
+    const existing = await getUserByUsername(raw);
+    if (existing && existing.id !== req.authUser!.id) {
+      return res.status(400).json({ error: 'That username is already taken.' });
+    }
+    await setUsername(req.authUser!.id, raw);
+    return res.json({ success: true, username: raw });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to set username.' });
+  }
+});
+
+app.get('/api/friends/search', requireAuth, async (req, res) => {
+  try {
+    const raw = String(req.query.username || '').trim().toLowerCase();
+    if (!raw) return res.status(400).json({ error: 'Missing username.' });
+
+    const target = await getUserByUsername(raw);
+    if (!target) return res.status(404).json({ error: 'No one has that username.' });
+    if (target.id === req.authUser!.id) {
+      return res.json({ user: { userId: target.id, username: target.username, name: target.name }, relationship: 'self' });
+    }
+
+    const existing = await getExistingRequestBetween(req.authUser!.id, target.id);
+    let relationship: 'none' | 'pending_outgoing' | 'pending_incoming' | 'friends' = 'none';
+    if (existing?.status === 'accepted') relationship = 'friends';
+    else if (existing?.status === 'pending') {
+      // Direction matters for which side sees "pending" vs "respond" --
+      // getExistingRequestBetween doesn't tell us direction, so look it up.
+      const incoming = await getIncomingRequests(req.authUser!.id);
+      relationship = incoming.some((r) => r.userId === target.id) ? 'pending_incoming' : 'pending_outgoing';
+    }
+
+    return res.json({ user: { userId: target.id, username: target.username, name: target.name }, relationship });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Search failed.' });
+  }
+});
+
+app.post('/api/friends/request', requireAuth, async (req, res) => {
+  try {
+    const raw = String(req.body.username || '').trim().toLowerCase();
+    const target = await getUserByUsername(raw);
+    if (!target) return res.status(404).json({ error: 'No one has that username.' });
+    if (target.id === req.authUser!.id) {
+      return res.status(400).json({ error: "You can't add yourself." });
+    }
+    const existing = await getExistingRequestBetween(req.authUser!.id, target.id);
+    if (existing && existing.status !== 'declined') {
+      return res.status(400).json({ error: existing.status === 'accepted' ? 'You are already friends.' : 'A request is already pending between you.' });
+    }
+    await createFriendRequest(req.authUser!.id, target.id);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to send friend request.' });
+  }
+});
+
+app.get('/api/friends/requests', requireAuth, async (req, res) => {
+  try {
+    const [incoming, outgoing] = await Promise.all([
+      getIncomingRequests(req.authUser!.id),
+      getOutgoingRequests(req.authUser!.id),
+    ]);
+    return res.json({ incoming, outgoing });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to load requests.' });
+  }
+});
+
+app.post('/api/friends/respond', requireAuth, async (req, res) => {
+  try {
+    const requestId = Number(req.body.requestId);
+    const accept = Boolean(req.body.accept);
+    if (!requestId) return res.status(400).json({ error: 'Missing requestId.' });
+
+    const result = await respondToFriendRequest(requestId, req.authUser!.id, accept);
+    if (!result) {
+      return res.status(404).json({ error: 'Request not found, already answered, or not addressed to you.' });
+    }
+    return res.json({ success: true, accepted: accept });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to respond to request.' });
+  }
+});
+
+// Snapchat-style mutual streak: consecutive days (counting back from today,
+// with a one-day grace period so it doesn't look broken before either of
+// you has read yet this morning) where BOTH of you did something that
+// counts as daily activity.
+function computeFriendStreak(datesA: string[], datesB: string[]): number {
+  const setA = new Set(datesA);
+  const setB = new Set(datesB);
+  const fmt = (d: Date) => d.toISOString().split('T')[0];
+
+  const cursor = new Date();
+  if (!(setA.has(fmt(cursor)) && setB.has(fmt(cursor)))) {
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  let streak = 0;
+  while (setA.has(fmt(cursor)) && setB.has(fmt(cursor))) {
+    streak++;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
+}
+
+app.get('/api/friends', requireAuth, async (req, res) => {
+  try {
+    const myReadingDates: string[] = req.authUser!.data?.stats?.readingDates ?? [];
+    const friends = await getFriends(req.authUser!.id);
+    return res.json({
+      friends: friends.map((f) => ({
+        userId: f.userId,
+        username: f.username,
+        name: f.name,
+        streakDays: f.streakDays,
+        friendStreak: computeFriendStreak(myReadingDates, f.readingDates),
+        since: f.since,
+      })),
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to load friends.' });
+  }
+});
+
+app.delete('/api/friends/:friendId', requireAuth, async (req, res) => {
+  try {
+    await removeFriendship(req.authUser!.id, req.params.friendId);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to remove friend.' });
   }
 });
 
