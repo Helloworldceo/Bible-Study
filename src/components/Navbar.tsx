@@ -50,8 +50,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             className="flex items-center gap-3 cursor-pointer group select-none shrink-0"
             id="brand-logo-btn"
           >
-            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-gradient-to-br from-amber-500 to-amber-700 flex items-center justify-center shadow-lg shadow-amber-900/30 ring-1 ring-amber-400/30 group-hover:scale-105 transition-transform">
-              <BookOpen className="w-6 h-6 text-amber-50" />
+            <div className="w-10 h-10 sm:w-11 sm:h-11 shrink-0 shadow-lg shadow-amber-900/30 ring-1 ring-amber-400/30 rounded-xl group-hover:scale-105 transition-transform">
+              <img src="/favicon.svg" alt="Berean" className="w-full h-full" />
             </div>
             <div>
               <div className="flex items-center gap-2">

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="bereanBg" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f59e0b"/>
+      <stop offset="1" stop-color="#b45309"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="64" height="64" rx="14" fill="url(#bereanBg)"/>
+  <path fill="#fffbeb" d="
+    M31 23
+    C22 20 14 21 12 25
+    L12 43
+    C14 47 22 48 31 45
+    L31 23
+    Z
+  "/>
+  <path fill="#fffbeb" d="
+    M33 23
+    C42 20 50 21 52 25
+    L52 43
+    C50 47 42 48 33 45
+    L33 23
+    Z
+  "/>
+  <path fill="#fffbeb" d="
+    M32 6
+    C27 12 24 17 24 22
+    C24 27 27 30 32 30
+    C37 30 40 27 40 22
+    C40 17 37 12 32 6
+    Z
+  "/>
+</svg>
