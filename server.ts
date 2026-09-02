@@ -48,6 +48,33 @@ function getGeminiClient(): GoogleGenAI {
   return aiClient;
 }
 
+// Gemini returns a transient 503 ("high demand") often enough in practice
+// that a single-shot call falls back to the generic canned response a
+// noticeable fraction of the time even with a perfectly valid key and
+// question -- confirmed while testing this against the live model. One
+// short retry turns that into a rare double-failure instead, without
+// risking the serverless function's execution time budget.
+async function generateContentWithRetry(
+  params: Parameters<GoogleGenAI['models']['generateContent']>[0],
+  maxRetries = 1
+): ReturnType<GoogleGenAI['models']['generateContent']> {
+  const gemini = getGeminiClient();
+  let lastErr: any;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await gemini.models.generateContent(params);
+    } catch (err: any) {
+      lastErr = err;
+      const status = err?.status;
+      const message = err?.message || '';
+      const isRetryable = status === 503 || status === 429 || /UNAVAILABLE|RESOURCE_EXHAUSTED/i.test(message);
+      if (!isRetryable || attempt === maxRetries) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 // Persistent Neon Postgres store for multi-device sync & auth -- see db.ts.
 // Schema init and the demo-user seed run once at startup, before the server
 // starts accepting requests (see startServer() below).
@@ -390,7 +417,6 @@ app.post('/api/gemini/explain-verse', async (req, res) => {
       return res.status(400).json({ error: 'Verse reference is required.' });
     }
 
-    const gemini = getGeminiClient();
     const systemPrompt = `You are a world-class Biblical Scholar and Theological Guide for the Berean Study Bible app.
 Your mission is to provide deep, spiritually rich, historically accurate, and linguistically grounded study notes in both English and Amharic (አማርኛ).
 
@@ -412,7 +438,7 @@ User Preferred Language: ${lang === 'am' ? 'Amharic (አማርኛ)' : 'English'}
 
 Provide detailed theological study notes in ${lang === 'am' ? 'Amharic (with Ge\'ez and Greek context)' : 'English with Amharic nuances'}.`;
 
-    const response = await gemini.models.generateContent({
+    const response = await generateContentWithRetry({
       model: 'gemini-3.7-flash',
       contents: userPrompt,
       config: {
@@ -462,12 +488,11 @@ app.post('/api/gemini/study-qa', async (req, res) => {
       return res.status(400).json({ error: 'Question is required.' });
     }
 
-    const gemini = getGeminiClient();
     const systemPrompt = `You are the Berean Biblical AI Guide, helping users understand Scripture in English and Amharic (አማርኛ).
 You answer questions thoroughly with biblical citations, historical background, theological clarity, and practical warmth.
 If answering in Amharic, write in beautiful, respectful Amharic (መጽሐፍ ቅዱሳዊ አገላለጽ).`;
 
-    const response = await gemini.models.generateContent({
+    const response = await generateContentWithRetry({
       model: 'gemini-3.7-flash',
       contents: `Question: ${question}\nLanguage: ${lang === 'am' ? 'Amharic (አማርኛ)' : 'English'}`,
       config: {
@@ -529,7 +554,6 @@ app.post('/api/audio/tts', async (req, res) => {
       return res.status(400).json({ error: 'Text is required.' });
     }
 
-    const gemini = getGeminiClient();
     const validVoices = ['Kore', 'Puck', 'Charon', 'Fenrir', 'Zephyr'];
     const chosenVoice = validVoices.includes(voice) ? voice : (lang === 'am' ? 'Fenrir' : 'Kore');
 
@@ -542,7 +566,7 @@ app.post('/api/audio/tts', async (req, res) => {
       promptText = `Read this Holy Scripture clearly, with a peaceful, reverent, and uplifting tone:\n\n${text}`;
     }
 
-    const response = await gemini.models.generateContent({
+    const response = await generateContentWithRetry({
       model: 'gemini-3.1-flash-tts-preview',
       contents: [{ parts: [{ text: promptText }] }],
       config: {
