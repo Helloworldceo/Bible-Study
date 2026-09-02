@@ -6,21 +6,22 @@ import { StudyPlansView } from './components/StudyPlansView';
 import { ReflectionsPrayerJournal } from './components/ReflectionsPrayerJournal';
 import { DiscordBotHub } from './components/DiscordBotHub';
 import { AIStudyCompanion } from './components/AIStudyCompanion';
+import { BibleQuiz } from './components/BibleQuiz';
 import { VerseActionModal } from './components/VerseActionModal';
 import { AuthModal } from './components/AuthModal';
 import { AudioPlayerBar } from './components/AudioPlayerBar';
 
-import { 
-  BibleVerse, BookmarkItem, DiscordConfig, HighlightItem, 
-  Language, NoteItem, PrayerItem, StudyPlan, UserPlanProgress, 
-  UserProfile, UserStats 
+import {
+  BibleVerse, BookmarkItem, DiscordConfig, HighlightItem,
+  Language, NoteItem, PrayerItem, QuizSetProgress, StudyPlan, UserPlanProgress,
+  UserProfile, UserStats
 } from './types';
 import { StorageManager } from './utils/offlineStorage';
 import { useTranslation } from './utils/translations';
 
 export const App: React.FC = () => {
   // Navigation & Language
-  const [currentTab, setCurrentTab] = useState<'bible' | 'devotionals' | 'plans' | 'journal' | 'discord' | 'ai'>('bible');
+  const [currentTab, setCurrentTab] = useState<'bible' | 'devotionals' | 'plans' | 'journal' | 'quiz' | 'discord' | 'ai'>('bible');
   const [lang, setLang] = useState<Language>(() => {
     const saved = localStorage.getItem('berean_app_lang_v1');
     return (saved === 'am' ? 'am' : 'en') as Language;
@@ -40,6 +41,7 @@ export const App: React.FC = () => {
   const [prayers, setPrayers] = useState<PrayerItem[]>(() => StorageManager.getPrayers());
   const [plansProgress, setPlansProgress] = useState<Record<string, UserPlanProgress>>(() => StorageManager.getPlansProgress());
   const [customPlans, setCustomPlans] = useState<StudyPlan[]>(() => StorageManager.getCustomPlans());
+  const [quizProgress, setQuizProgress] = useState<Record<string, QuizSetProgress>>(() => StorageManager.getQuizProgress());
   const [stats, setStats] = useState<UserStats>(() => StorageManager.getStats());
 
   // Online & Sync State
@@ -241,6 +243,15 @@ export const App: React.FC = () => {
     handleCloudSync();
   };
 
+  // Bible Quiz completion handler -- also counts as the day's activity for
+  // the reading streak (see StorageManager.recordQuizResult).
+  const handleQuizComplete = (setId: string, correctCount: number, totalQuestions: number) => {
+    StorageManager.recordQuizResult(setId, correctCount, totalQuestions);
+    setQuizProgress(StorageManager.getQuizProgress());
+    setStats(StorageManager.getStats());
+    handleCloudSync();
+  };
+
   const handleSaveCustomPlan = (plan: StudyPlan) => {
     const updated = StorageManager.saveCustomPlan(plan);
     setCustomPlans([...updated]);
@@ -309,6 +320,7 @@ export const App: React.FC = () => {
       setPrayers(StorageManager.getPrayers());
       setPlansProgress(StorageManager.getPlansProgress());
       setCustomPlans(StorageManager.getCustomPlans());
+      setQuizProgress(StorageManager.getQuizProgress());
       setStats(StorageManager.getStats());
       const position = StorageManager.getLastReadPosition();
       if (position) {
@@ -462,6 +474,15 @@ export const App: React.FC = () => {
             lastSyncedAt={lastSyncedAt}
             user={user}
             onOpenAuth={() => setIsAuthModalOpen(true)}
+          />
+        )}
+
+        {currentTab === 'quiz' && (
+          <BibleQuiz
+            lang={lang}
+            stats={stats}
+            quizProgress={quizProgress}
+            onComplete={handleQuizComplete}
           />
         )}
 

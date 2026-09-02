@@ -13,6 +13,7 @@ export const translations = {
     tabJournal: 'Reflections & Prayers',
     tabDiscord: 'Discord Bot Hub',
     tabAICompanion: 'AI Study Assistant',
+    tabQuiz: 'Bible Quiz',
     
     // Auth & Status
     signIn: 'Sign In',
@@ -157,6 +158,7 @@ export const translations = {
     tabJournal: 'ማሰላሰያ እና ጸሎት',
     tabDiscord: 'የዲስኮርድ ቦት (Discord Bot)',
     tabAICompanion: 'የመጽሐፍ ቅዱስ AI ረዳት',
+    tabQuiz: 'የመጽሐፍ ቅዱስ ጥያቄዎች',
     
     // Auth & Status
     signIn: 'ግባ',
@@ -301,6 +303,7 @@ export const translations = {
     tabJournal: 'Réflexions & Prières',
     tabDiscord: 'Bot Discord',
     tabAICompanion: 'Assistant Biblique IA',
+    tabQuiz: 'Quiz Biblique',
     
     // Auth & Status
     signIn: 'Se Connecter',

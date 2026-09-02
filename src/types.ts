@@ -164,6 +164,37 @@ export interface UserStats {
   answeredPrayersCount: number;
   completedPlansCount: number;
   readingDates: string[]; // ISO dates for heatmap
+  quizXP: number;
+}
+
+export interface QuizQuestion {
+  id: string;
+  type: 'multiple-choice' | 'fill-blank';
+  questionEn: string;
+  questionAm: string;
+  choicesEn: string[];
+  choicesAm: string[];
+  correctIndex: number;
+  reference?: string;
+  explanationEn: string;
+  explanationAm: string;
+}
+
+export interface QuizSet {
+  id: string;
+  titleEn: string;
+  titleAm: string;
+  descriptionEn: string;
+  descriptionAm: string;
+  iconName: string;
+  questions: QuizQuestion[];
+}
+
+export interface QuizSetProgress {
+  setId: string;
+  bestScore: number; // out of questions.length
+  timesCompleted: number;
+  lastCompletedAt: string;
 }
 
 export interface DiscordConfig {
@@ -212,4 +243,5 @@ export interface SyncPayload {
   customPlans: StudyPlan[];
   stats: UserStats;
   lastReadPosition?: { bookId: string; chapter: number };
+  quizProgress?: Record<string, QuizSetProgress>;
 }

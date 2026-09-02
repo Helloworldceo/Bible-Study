@@ -1,4 +1,4 @@
-import { BookmarkItem, HighlightItem, NoteItem, PrayerItem, StudyPlan, SyncPayload, UserPlanProgress, UserStats } from '../types';
+import { BookmarkItem, HighlightItem, NoteItem, PrayerItem, QuizSetProgress, StudyPlan, SyncPayload, UserPlanProgress, UserStats } from '../types';
 
 const STORAGE_KEYS = {
   HIGHLIGHTS: 'berean_highlights_v1',
@@ -9,6 +9,7 @@ const STORAGE_KEYS = {
   CUSTOM_PLANS: 'berean_custom_plans_v1',
   STATS: 'berean_stats_v1',
   LAST_READ_POSITION: 'berean_last_read_position_v1',
+  QUIZ_PROGRESS: 'berean_quiz_progress_v1',
   AUTH_USER: 'berean_auth_user_v1',
   AUTH_TOKEN: 'berean_auth_token_v1',
   APP_LANG: 'berean_app_lang_v1',
@@ -47,6 +48,7 @@ const DEFAULT_STATS: UserStats = {
   answeredPrayersCount: 0,
   completedPlansCount: 0,
   readingDates: [],
+  quizXP: 0,
 };
 
 export class StorageManager {
@@ -197,17 +199,52 @@ export class StorageManager {
     localStorage.setItem(STORAGE_KEYS.STATS, JSON.stringify(stats));
   }
 
-  static recordReadingActivity(chapterKey: string): void {
+  // Shared streak logic -- bumps the daily streak once per calendar day
+  // regardless of *which* activity triggered it (reading a chapter or
+  // completing a quiz), without touching chapter-specific counters.
+  static recordDailyActivity(): void {
     const stats = this.getStats();
     const today = new Date().toISOString().split('T')[0];
-    
+
     if (!stats.readingDates.includes(today)) {
       stats.readingDates.push(today);
       stats.streakDays += 1;
     }
     stats.lastActiveDate = today;
+    this.saveStats(stats);
+  }
+
+  static recordReadingActivity(chapterKey: string): void {
+    this.recordDailyActivity();
+    const stats = this.getStats();
     stats.totalChaptersRead += 1;
     this.saveStats(stats);
+  }
+
+  static getQuizProgress(): Record<string, QuizSetProgress> {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.QUIZ_PROGRESS);
+      return data ? JSON.parse(data) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  // Also counts as the day's activity for the reading streak -- a quiz
+  // session is a real study session, not just passive page-viewing.
+  static recordQuizResult(setId: string, correctCount: number, totalQuestions: number): void {
+    const progress = this.getQuizProgress();
+    const existing = progress[setId];
+    progress[setId] = {
+      setId,
+      bestScore: Math.max(existing?.bestScore ?? 0, correctCount),
+      timesCompleted: (existing?.timesCompleted ?? 0) + 1,
+      lastCompletedAt: new Date().toISOString(),
+    };
+    localStorage.setItem(STORAGE_KEYS.QUIZ_PROGRESS, JSON.stringify(progress));
+
+    this.recordDailyActivity();
+    this.incrementStat('quizXP', correctCount * 10);
   }
 
   static incrementStat(key: keyof UserStats, amount = 1): void {
@@ -284,6 +321,7 @@ export class StorageManager {
       customPlans: this.getCustomPlans(),
       stats: this.getStats(),
       lastReadPosition: this.getLastReadPosition() ?? undefined,
+      quizProgress: this.getQuizProgress(),
     };
   }
 
@@ -296,5 +334,6 @@ export class StorageManager {
     if (payload.customPlans) localStorage.setItem(STORAGE_KEYS.CUSTOM_PLANS, JSON.stringify(payload.customPlans));
     if (payload.stats) localStorage.setItem(STORAGE_KEYS.STATS, JSON.stringify(payload.stats));
     if (payload.lastReadPosition) localStorage.setItem(STORAGE_KEYS.LAST_READ_POSITION, JSON.stringify(payload.lastReadPosition));
+    if (payload.quizProgress) localStorage.setItem(STORAGE_KEYS.QUIZ_PROGRESS, JSON.stringify(payload.quizProgress));
   }
 }
