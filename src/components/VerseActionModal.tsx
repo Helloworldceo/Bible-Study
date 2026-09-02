@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { X, Highlighter, Bookmark, FileText, Sparkles, Send, Copy, Volume2, Check, ExternalLink, BookOpen, Play, Pause, Globe, Music } from 'lucide-react';
+import { X, Highlighter, Bookmark, FileText, Sparkles, Send, Copy, Volume2, Check, ExternalLink, BookOpen, Play, Pause, Globe, Music, ImageIcon } from 'lucide-react';
 import { BibleVerse, HighlightItem, Language, UserProfile } from '../types';
 import { useTranslation } from '../utils/translations';
 import { StorageManager } from '../utils/offlineStorage';
 import { audioReader, AudioLangMode } from '../utils/audioReaderService';
+import { VerseImageCard } from './VerseImageCard';
 
 interface VerseActionModalProps {
   verse: BibleVerse | null;
@@ -43,6 +44,7 @@ export const VerseActionModal: React.FC<VerseActionModalProps> = ({
   const [aiResult, setAiResult] = useState<any>(null);
   const [discordSending, setDiscordSending] = useState(false);
   const [discordStatus, setDiscordStatus] = useState<string | null>(null);
+  const [isImageCardOpen, setIsImageCardOpen] = useState(false);
 
   // Note form state
   const [noteTitle, setNoteTitle] = useState(`Reflection on ${verse.bookNameEn} ${verse.chapter}:${verse.verse}`);
@@ -266,11 +268,11 @@ export const VerseActionModal: React.FC<VerseActionModalProps> = ({
               </div>
 
               {/* Action Buttons Grid */}
-              <div className="grid grid-cols-2 gap-3 pt-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2">
                 <button
                   onClick={() => onToggleBookmark(verse)}
                   className={`p-3 rounded-xl border flex items-center justify-center gap-2 text-xs font-medium transition-all ${
-                    isBookmarked 
+                    isBookmarked
                       ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-400 text-amber-800 dark:text-amber-300 shadow-sm'
                       : 'border-stone-200 dark:border-stone-800 hover:bg-stone-50 dark:hover:bg-stone-800 text-stone-700 dark:text-stone-300'
                   }`}
@@ -285,6 +287,14 @@ export const VerseActionModal: React.FC<VerseActionModalProps> = ({
                 >
                   {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4 text-stone-400" />}
                   <span>{copied ? 'Copied Both!' : 'Copy Bilingual'}</span>
+                </button>
+
+                <button
+                  onClick={() => setIsImageCardOpen(true)}
+                  className="p-3 rounded-xl border border-stone-200 dark:border-stone-800 hover:bg-stone-50 dark:hover:bg-stone-800 text-stone-700 dark:text-stone-300 flex items-center justify-center gap-2 text-xs font-medium transition-all"
+                >
+                  <ImageIcon className="w-4 h-4 text-stone-400" />
+                  <span>Save as Image</span>
                 </button>
               </div>
 
@@ -589,6 +599,10 @@ export const VerseActionModal: React.FC<VerseActionModalProps> = ({
         </div>
 
       </div>
+
+      {isImageCardOpen && (
+        <VerseImageCard verse={verse} lang={lang} onClose={() => setIsImageCardOpen(false)} />
+      )}
     </div>
   );
 };

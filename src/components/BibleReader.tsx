@@ -53,6 +53,7 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
   const [isAudioMenuOpen, setIsAudioMenuOpen] = useState(false);
   const [playbackState, setPlaybackState] = useState<AudioPlaybackState>(audioReader.getState());
   const [autoScrollWithAudio, setAutoScrollWithAudio] = useState(true);
+  const [chapterCopied, setChapterCopied] = useState(false);
 
   const activeBook = BIBLE_BOOKS.find(b => b.id === selectedBookId) || BIBLE_BOOKS[0];
 
@@ -154,6 +155,33 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
     ensureBookOffline(activeBook.id).then(() => {
       StorageManager.isBookOfflineSaved(activeBook.id).then(setIsOfflineSaved);
     });
+  };
+
+  // Copies the whole chapter (book name, chapter number, every verse) in
+  // whatever language(s) are currently on screen -- so switching to
+  // Parallel/EN/FR/AM before copying changes what gets shared, matching
+  // what the reader is actually looking at.
+  const handleCopyChapter = () => {
+    const heading = viewMode === 'parallel'
+      ? `${chapterData.bookNameEn} ${chapterData.chapter} | ${chapterData.bookNameAm} ${chapterData.chapter}`
+      : viewMode === 'am'
+      ? `${chapterData.bookNameAm} ${chapterData.chapter}`
+      : viewMode === 'fr' && chapterData.bookNameFr
+      ? `${chapterData.bookNameFr} ${chapterData.chapter}`
+      : `${chapterData.bookNameEn} ${chapterData.chapter}`;
+
+    const body = chapterData.verses.map((v) => {
+      if (viewMode === 'parallel') {
+        return `${v.verse}. ${v.textEn}\n${' '.repeat(String(v.verse).length + 2)}${v.textAm}`;
+      }
+      if (viewMode === 'am') return `${v.verse}. ${v.textAm}`;
+      if (viewMode === 'fr') return `${v.verse}. ${v.textFr || v.textEn}`;
+      return `${v.verse}. ${v.textEn}`;
+    }).join('\n\n');
+
+    navigator.clipboard.writeText(`${heading}\n\n${body}`);
+    setChapterCopied(true);
+    setTimeout(() => setChapterCopied(false), 2000);
   };
 
   // Font size class mapping
@@ -558,6 +586,20 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
             >
               {isOfflineSaved ? <Check className="w-4 h-4 text-emerald-600" /> : <Download className="w-4 h-4 text-stone-500" />}
               <span className="hidden xl:inline">{isOfflineSaved ? 'Offline Ready' : 'Save Offline'}</span>
+            </button>
+
+            {/* Copy Whole Chapter (book, chapter, every verse -- one click to share) */}
+            <button
+              onClick={handleCopyChapter}
+              className={`p-2 rounded-xl border text-xs flex items-center gap-1.5 font-medium transition-all ${
+                chapterCopied
+                  ? 'bg-emerald-100 dark:bg-emerald-950/50 border-emerald-400 text-emerald-800 dark:text-emerald-300'
+                  : 'bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 border-stone-200 dark:border-stone-700 text-stone-700 dark:text-stone-300'
+              }`}
+              title="Copy the whole chapter to share"
+            >
+              {chapterCopied ? <Check className="w-4 h-4 text-emerald-600" /> : <FileText className="w-4 h-4 text-stone-500" />}
+              <span className="hidden xl:inline">{chapterCopied ? 'Copied!' : 'Copy Chapter'}</span>
             </button>
 
           </div>

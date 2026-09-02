@@ -195,11 +195,14 @@ export const ReflectionsPrayerJournal: React.FC<ReflectionsPrayerJournalProps> =
         </div>
       </div>
 
-      {/* Sub Tabs: (1) Notes & Reflections, (2) Prayer Journal, (3) Sync & Privacy */}
-      <div className="flex border-b border-stone-200 dark:border-stone-800 gap-6 text-sm font-semibold">
+      {/* Sub Tabs: (1) Notes & Reflections, (2) Prayer Journal, (3) Sync &
+          Privacy -- these labels are long (counts, "Active / Answered"),
+          so on a phone this scrolls horizontally as one line instead of
+          each button shrinking and wrapping its text across several lines. */}
+      <div className="flex overflow-x-auto no-scrollbar border-b border-stone-200 dark:border-stone-800 gap-6 text-sm font-semibold">
         <button
           onClick={() => setActiveSubTab('notes')}
-          className={`pb-3 border-b-2 transition-colors flex items-center gap-2 ${
+          className={`pb-3 border-b-2 transition-colors flex items-center gap-2 shrink-0 whitespace-nowrap ${
             activeSubTab === 'notes'
               ? 'border-amber-600 text-amber-700 dark:text-amber-400'
               : 'border-transparent text-stone-500 hover:text-stone-800 dark:hover:text-stone-300'
@@ -211,7 +214,7 @@ export const ReflectionsPrayerJournal: React.FC<ReflectionsPrayerJournalProps> =
 
         <button
           onClick={() => setActiveSubTab('prayers')}
-          className={`pb-3 border-b-2 transition-colors flex items-center gap-2 ${
+          className={`pb-3 border-b-2 transition-colors flex items-center gap-2 shrink-0 whitespace-nowrap ${
             activeSubTab === 'prayers'
               ? 'border-amber-600 text-amber-700 dark:text-amber-400'
               : 'border-transparent text-stone-500 hover:text-stone-800 dark:hover:text-stone-300'
@@ -223,7 +226,7 @@ export const ReflectionsPrayerJournal: React.FC<ReflectionsPrayerJournalProps> =
 
         <button
           onClick={() => setActiveSubTab('sync')}
-          className={`pb-3 border-b-2 transition-colors flex items-center gap-2 ${
+          className={`pb-3 border-b-2 transition-colors flex items-center gap-2 shrink-0 whitespace-nowrap ${
             activeSubTab === 'sync'
               ? 'border-amber-600 text-amber-700 dark:text-amber-400'
               : 'border-transparent text-stone-500 hover:text-stone-800 dark:hover:text-stone-300'

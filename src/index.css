@@ -37,3 +37,14 @@
   background: rgba(168, 162, 158, 0.6);
 }
 
+/* Used on horizontally-scrollable tab strips (mobile nav, sub-tabs) where a
+   visible scrollbar would look like a stray UI element rather than content
+   that's meant to be swiped. */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+

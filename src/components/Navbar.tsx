@@ -119,20 +119,32 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span className="hidden xl:inline">{isSyncing ? t.syncing : t.synced}</span>
             </button>
 
-            {/* Online/Offline Status Indicator */}
-            <div 
+            {/* Online/Offline Status Indicator -- hidden below sm, along with
+                the sync button above, so the header's right-hand cluster
+                actually fits next to the logo on a phone screen instead of
+                pushing the Sign In button off the edge of the viewport. */}
+            <div
               title={isOnline ? t.onlineMode : t.offlineMode}
-              className={`p-1.5 rounded-lg border text-xs flex items-center justify-center ${
-                isOnline 
-                  ? 'bg-emerald-950/40 border-emerald-800/50 text-emerald-400' 
+              className={`hidden sm:flex p-1.5 rounded-lg border text-xs items-center justify-center ${
+                isOnline
+                  ? 'bg-emerald-950/40 border-emerald-800/50 text-emerald-400'
                   : 'bg-amber-950/50 border-amber-700/60 text-amber-300'
               }`}
             >
               {isOnline ? <Wifi className="w-3.5 h-3.5" /> : <WifiOff className="w-3.5 h-3.5" />}
             </div>
 
-            {/* Language Switcher Dropdown / Cycling */}
-            <div className="flex items-center rounded-lg bg-stone-800 border border-stone-700 p-0.5 text-xs">
+            {/* Language Switcher: a single cycling button below sm (the
+                three-way toggle is too wide to fit on a phone), the full
+                three-button toggle from sm upward. */}
+            <button
+              onClick={() => setLang(lang === 'en' ? 'fr' : lang === 'fr' ? 'am' : 'en')}
+              title={lang === 'en' ? 'English' : lang === 'fr' ? 'Français' : 'አማርኛ'}
+              className="sm:hidden px-2.5 py-1.5 rounded-lg bg-stone-800 border border-stone-700 text-xs font-semibold text-white font-ethiopic"
+            >
+              {lang === 'en' ? 'EN' : lang === 'fr' ? 'FR' : 'አማ'}
+            </button>
+            <div className="hidden sm:flex items-center rounded-lg bg-stone-800 border border-stone-700 p-0.5 text-xs">
               <button
                 id="lang-btn-en"
                 onClick={() => setLang('en')}
