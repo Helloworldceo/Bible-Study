@@ -10,6 +10,7 @@ import { BibleQuiz } from './components/BibleQuiz';
 import { VerseActionModal } from './components/VerseActionModal';
 import { AuthModal } from './components/AuthModal';
 import { AudioPlayerBar } from './components/AudioPlayerBar';
+import { InstallPrompt } from './components/InstallPrompt';
 
 import {
   BibleVerse, BookmarkItem, DiscordConfig, HighlightItem,
@@ -553,6 +554,9 @@ export const App: React.FC = () => {
 
       {/* Floating Audio Player & Narrator Controller */}
       <AudioPlayerBar appLang={lang} />
+
+      {/* "Add to Home Screen" / "Install" prompt for the PWA */}
+      <InstallPrompt lang={lang} />
 
       {/* Global Minimal Footer */}
       <footer className="py-6 px-4 border-t border-stone-200 dark:border-stone-800 bg-white/60 dark:bg-stone-900/60 backdrop-blur-sm text-center text-xs text-stone-500 space-y-1">
