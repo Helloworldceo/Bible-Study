@@ -170,13 +170,17 @@ export interface DiscordConfig {
   webhookUrl: string;
   channelName: string;
   serverName: string;
-  scheduledTime: string; // e.g. "08:00"
   isEnabled: boolean;
   language: 'en' | 'am' | 'both';
-  verseCategory: 'daily' | 'encouragement' | 'peace' | 'faith' | 'wisdom';
   includeDevotionalSnippet: boolean;
-  botToken?: string;
-  guildId?: string;
+}
+
+export interface DiscordDeliveryLogEntry {
+  sentAt: string;
+  verseRef: string;
+  triggerSource: 'cron' | 'manual';
+  status: 'success' | 'error';
+  errorMessage?: string;
 }
 
 export interface DiscordLog {
@@ -206,5 +210,4 @@ export interface SyncPayload {
   plansProgress: Record<string, UserPlanProgress>;
   customPlans: StudyPlan[];
   stats: UserStats;
-  discordConfig: DiscordConfig;
 }

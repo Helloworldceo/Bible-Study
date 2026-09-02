@@ -390,7 +390,7 @@ export const AudioPlayerBar: React.FC<AudioPlayerBarProps> = ({ appLang }) => {
                   </span>
                   <p className="text-[11px] text-stone-400 mt-0.5">
                     {playbackState.engine === 'wordproject' 
-                      ? (appLang === 'am' ? '🎙️ WordProject እውነተኛ የሰው ድምጽ ንባብ (አማርኛ፣ እንግሊዝኛ፣ ፈረንሳይኛ)' : '🎙️ WordProject Authentic Human Narration (Amharic, KJV, French)')
+                      ? (appLang === 'am' ? '🎙️ WordProject እውነተኛ የሰው ድምጽ ንባብ (አማርኛ፣ እንግሊዝኛ፣ ፈረንሳይኛ)' : '🎙️ WordProject Authentic Human Narration (Amharic, English, French)')
                       : playbackState.engine === 'ai'
                       ? (appLang === 'am' ? '✨ Gemini Studio AI የቁጥር በቁጥር ንባብ' : '✨ Gemini Studio AI HD Verse-by-Verse Speech')
                       : (appLang === 'am' ? '📻 የብሮውዘር ድምጽ (መሣሪያ)' : '📻 Local Device Fallback TTS')}
@@ -605,7 +605,7 @@ export const AudioPlayerBar: React.FC<AudioPlayerBarProps> = ({ appLang }) => {
               {/* WordProject attribution banner */}
               {playbackState.engine === 'wordproject' && (
                 <div className="text-[11px] text-stone-400 bg-emerald-950/30 border border-emerald-500/20 p-2 rounded-xl flex items-center justify-between">
-                  <span>🎙️ Audio recordings provided by <strong>WordProject.org</strong> (Talking Bibles & KJV audio archives).</span>
+                  <span>🎙️ Audio recordings provided by <strong>WordProject.org</strong> (Talking Bibles & English audio archives).</span>
                 </div>
               )}
             </motion.div>

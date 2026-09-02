@@ -1,11 +1,14 @@
 {
   "functions": {
     "api/index.ts": {
-      "includeFiles": "{server.ts,db.ts}",
+      "includeFiles": "{server.ts,db.ts,discordVerses.ts}",
       "maxDuration": 30
     }
   },
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api" }
+  ],
+  "crons": [
+    { "path": "/api/discord/daily-post", "schedule": "0 8 * * *" }
   ]
 }

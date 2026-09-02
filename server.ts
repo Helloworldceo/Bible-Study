@@ -19,7 +19,14 @@ import {
   hashPassword,
   verifyPassword,
   seedDemoUserIfMissing,
+  getDiscordConfig,
+  saveDiscordConfig,
+  logDiscordDelivery,
+  getRecentDiscordDeliveries,
+  hasSuccessfulDeliveryToday,
+  type DiscordConfig,
 } from './db.js'; // see the note in api/index.ts on why this extension is required
+import { DISCORD_VERSE_POOL, getVerseForDate, type DiscordVerse } from './discordVerses.js';
 
 dotenv.config();
 
@@ -88,44 +95,9 @@ async function generateContentWithRetry(
 // Schema init and the demo-user seed run once at startup, before the server
 // starts accepting requests (see startServer() below).
 
-// Daily verses collection for Discord dispatch
-const DISCORD_VERSE_COLLECTION = [
-  {
-    refEn: 'Psalm 23:1-3',
-    refAm: 'መዝሙረ ዳዊት 23:1-3',
-    en: 'The Lord is my shepherd; I shall not want. He makes me to lie down in green pastures; He leads me beside the still waters. He restores my soul.',
-    am: 'እግዚአብሔር እረኛዬ ነው፥ የሚያሳጣኝም የለም። በለመለመ መስክ ያሳድረኛል፤ በዕረፍት ውኃ ዘንድ ይመራኛል። ነፍሴን መለሳት፥ ስለ ስሙም በጽድቅ መንገድ መራኝ።',
-    theme: 'Peace & Comfort (ሰላም እና መፅናናት)'
-  },
-  {
-    refEn: 'Proverbs 3:5-6',
-    refAm: 'መጽሐፈ ምሳሌ 3:5-6',
-    en: 'Trust in the Lord with all your heart, and lean not on your own understanding; in all your ways acknowledge Him, and He shall direct your paths.',
-    am: 'በፍጹም ልብህ በእግዚአብሔር ታመን፥ በራስህም ማስተዋል አትደገፍ፤ በመንገድህ ሁሉ እርሱን እወቅ፥ እርሱም ጎዳናህን ያቀናልሃል።',
-    theme: 'Wisdom & Guidance (ጥበብ እና መመሪያ)'
-  },
-  {
-    refEn: 'Isaiah 40:31',
-    refAm: 'ትንቢተ ኢሳይያስ 40:31',
-    en: 'Those who wait on the Lord shall renew their strength; they shall mount up with wings like eagles, they shall run and not be weary, they shall walk and not faint.',
-    am: 'እግዚአብሔርን በመተማመን የሚጠባበቁ ግን ኃይላቸውን ያድሳሉ፤ እንደ ንስር በክንፍ ይወጣሉ፤ ይሮጣሉ አይታክቱም፥ ይሄዳሉ አይደክሙም።',
-    theme: 'Strength & Renewal (ብርታት እና መታደስ)'
-  },
-  {
-    refEn: 'Romans 8:28',
-    refAm: 'ወደ ሮሜ ሰዎች 8:28',
-    en: 'And we know that all things work together for good to those who love God, to those who are called according to His purpose.',
-    am: 'እግዚአብሔርንም ለሚወዱት እንደ አሳቡም ለተጠሩት ነገር ሁሉ ለበጎ እንዲደረግ እናውቃለን።',
-    theme: 'Hope & Sovereignty (ተስፋ እና ሉዓላዊነት)'
-  },
-  {
-    refEn: 'Philippians 4:6-7',
-    refAm: 'ወደ ፊልጵስዩስ ሰዎች 4:6-7',
-    en: 'Be anxious for nothing, but in everything by prayer and supplication, with thanksgiving, let your requests be made known to God; and the peace of God, which surpasses all understanding, will guard your hearts and minds.',
-    am: 'በነገር ሁሉ በጸሎትና በምልጃ ከምስጋና ጋር በእግዚአብሔር ዘንድ ልመናችሁን አስታውቁ እንጂ በአንዳች አትጨነቁ፤ አእምሮንም ሁሉ የሚያልፍ የእግዚአብሔር ሰላም ልባችሁንና አሳባችሁን በክርስቶስ ኢየሱስ ይጠብቃል።',
-    theme: 'Freedom from Worry (ከጭንቀት ነጻ መውጣት)'
-  }
-];
+// Daily verses for Discord dispatch -- see discordVerses.ts for the full
+// 136-verse curated pool (real text, not placeholder) and the deterministic
+// day-based picker used by the automatic cron post below.
 
 // --- AUTH API ROUTES ---
 app.post('/api/auth/register', async (req, res) => {
@@ -274,6 +246,60 @@ app.get('/api/sync/pull', async (req, res) => {
 });
 
 // --- DISCORD INTEGRATION API ---
+
+function buildVerseEmbedPayload(verse: DiscordVerse, language: 'both' | 'en' | 'am', customMessage?: string) {
+  let descriptionText = '';
+  if (language === 'en') {
+    descriptionText = `📖 **${verse.refEn}**\n\n> "${verse.en}"\n\n*Theme:* **${verse.theme}**`;
+  } else if (language === 'am') {
+    descriptionText = `📖 **${verse.refAm}**\n\n> "${verse.am}"\n\n*ጭብጥ:* **${verse.theme}**`;
+  } else {
+    descriptionText = `📖 **${verse.refEn} | ${verse.refAm}**\n\n**English:**\n> "${verse.en}"\n\n**አማርኛ (Amharic):**\n> "${verse.am}"\n\n🌿 *Theme / ጭብጥ:* **${verse.theme}**`;
+  }
+  if (customMessage) {
+    descriptionText += `\n\n💬 *Community Note:* ${customMessage}`;
+  }
+
+  return {
+    username: 'Berean Study Bible Bot | መጽሐፍ ቅዱስ',
+    avatar_url: 'https://images.unsplash.com/photo-1507692049790-de58290a4334?w=256&auto=format&fit=crop&q=80',
+    embeds: [
+      {
+        title: '✨ Daily Scripture & Devotional Reminder | የዕለት ጥቅስ',
+        description: descriptionText,
+        color: 0xD97706, // Rich gold / amber
+        fields: [
+          {
+            name: '🙏 Daily Prayer Focus | የዛሬ ጸሎት',
+            value: language === 'am'
+              ? 'ጌታ ሆይ፥ ዛሬ በቅዱስ ቃልህና በሰላምህ ምራኝ፤ ልቤንም በጸጋህ አበርታው። አሜን።'
+              : 'Lord, guide my steps today by Your living Word and fill my heart with Your unshakeable peace. Amen.',
+            inline: false
+          }
+        ],
+        footer: {
+          text: 'Berean Bilingual Study Bible • English & አማርኛ • Daily Reminders',
+          icon_url: 'https://images.unsplash.com/photo-1544717305-2782549b5136?w=64&auto=format&fit=crop&q=80'
+        },
+        timestamp: new Date().toISOString()
+      }
+    ]
+  };
+}
+
+async function sendToDiscordWebhook(webhookUrl: string, payload: unknown): Promise<{ ok: boolean; error?: string }> {
+  const discordResponse = await fetch(webhookUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!discordResponse.ok) {
+    const errorText = await discordResponse.text();
+    return { ok: false, error: `Discord Webhook returned error: ${discordResponse.status} ${errorText}` };
+  }
+  return { ok: true };
+}
+
 app.post('/api/discord/test-webhook', async (req, res) => {
   try {
     const { webhookUrl, language = 'both', customMessage, verseRef } = req.body;
@@ -282,61 +308,19 @@ app.post('/api/discord/test-webhook', async (req, res) => {
       return res.status(400).json({ error: 'Please provide a valid Discord Webhook URL starting with https://discord.com/api/webhooks/' });
     }
 
-    const selectedVerse = verseRef 
-      ? DISCORD_VERSE_COLLECTION.find(v => v.refEn.includes(verseRef)) || DISCORD_VERSE_COLLECTION[0]
-      : DISCORD_VERSE_COLLECTION[Math.floor(Math.random() * DISCORD_VERSE_COLLECTION.length)];
+    const selectedVerse = verseRef
+      ? DISCORD_VERSE_POOL.find(v => v.refEn.includes(verseRef)) || getVerseForDate()
+      : DISCORD_VERSE_POOL[Math.floor(Math.random() * DISCORD_VERSE_POOL.length)];
 
-    let descriptionText = '';
-    if (language === 'en') {
-      descriptionText = `📖 **${selectedVerse.refEn}**\n\n> "${selectedVerse.en}"\n\n*Theme:* **${selectedVerse.theme.split('(')[0]}**`;
-    } else if (language === 'am') {
-      descriptionText = `📖 **${selectedVerse.refAm}**\n\n> "${selectedVerse.am}"\n\n*ጭብጥ:* **${selectedVerse.theme}**`;
-    } else {
-      descriptionText = `📖 **${selectedVerse.refEn} | ${selectedVerse.refAm}**\n\n**English (KJV/WEB):**\n> "${selectedVerse.en}"\n\n**አማርኛ (Amharic):**\n> "${selectedVerse.am}"\n\n🌿 *Theme / ጭብጥ:* **${selectedVerse.theme}**`;
+    const embedPayload = buildVerseEmbedPayload(selectedVerse, language, customMessage);
+    const result = await sendToDiscordWebhook(webhookUrl, embedPayload);
+
+    if (!result.ok) {
+      await logDiscordDelivery({ sentAt: new Date().toISOString(), verseRef: selectedVerse.refEn, triggerSource: 'manual', status: 'error', errorMessage: result.error });
+      return res.status(502).json({ error: result.error });
     }
 
-    if (customMessage) {
-      descriptionText += `\n\n💬 *Community Note:* ${customMessage}`;
-    }
-
-    const embedPayload = {
-      username: 'Berean Study Bible Bot | መጽሐፍ ቅዱስ',
-      avatar_url: 'https://images.unsplash.com/photo-1507692049790-de58290a4334?w=256&auto=format&fit=crop&q=80',
-      embeds: [
-        {
-          title: '✨ Daily Scripture & Devotional Reminder | የዕለት ጥቅስ',
-          description: descriptionText,
-          color: 0xD97706, // Rich gold / amber
-          fields: [
-            {
-              name: '🙏 Daily Prayer Focus | የዛሬ ጸሎት',
-              value: language === 'am' 
-                ? 'ጌታ ሆይ፥ ዛሬ በቅዱስ ቃልህና በሰላምህ ምራኝ፤ ልቤንም በጸጋህ አበርታው። አሜን።'
-                : 'Lord, guide my steps today by Your living Word and fill my heart with Your unshakeable peace. Amen.',
-              inline: false
-            }
-          ],
-          footer: {
-            text: 'Berean Bilingual Study Bible • English & አማርኛ • Daily Reminders',
-            icon_url: 'https://images.unsplash.com/photo-1544717305-2782549b5136?w=64&auto=format&fit=crop&q=80'
-          },
-          timestamp: new Date().toISOString()
-        }
-      ]
-    };
-
-    const discordResponse = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(embedPayload)
-    });
-
-    if (!discordResponse.ok) {
-      const errorText = await discordResponse.text();
-      return res.status(discordResponse.status).json({
-        error: `Discord Webhook returned error: ${discordResponse.status} ${errorText}`
-      });
-    }
+    await logDiscordDelivery({ sentAt: new Date().toISOString(), verseRef: selectedVerse.refEn, triggerSource: 'manual', status: 'success' });
 
     return res.json({
       success: true,
@@ -346,6 +330,90 @@ app.post('/api/discord/test-webhook', async (req, res) => {
     });
   } catch (err: any) {
     return res.status(500).json({ error: err.message || 'Failed to send to Discord webhook.' });
+  }
+});
+
+// Server-side config (single global row) -- what the daily cron job reads,
+// unlike the old browser-localStorage version it replaces.
+app.get('/api/discord/config', async (req, res) => {
+  try {
+    const config = await getDiscordConfig();
+    return res.json({
+      config: config || {
+        webhookUrl: '', channelName: '', serverName: '', isEnabled: false, language: 'both', includeDevotionalSnippet: true,
+      }
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to load Discord config.' });
+  }
+});
+
+app.post('/api/discord/config', async (req, res) => {
+  try {
+    const { webhookUrl, channelName, serverName, isEnabled, language, includeDevotionalSnippet } = req.body as Partial<DiscordConfig>;
+    if (isEnabled && (!webhookUrl || !webhookUrl.startsWith('https://discord.com/api/webhooks/'))) {
+      return res.status(400).json({ error: 'A valid Discord Webhook URL is required to enable automatic daily posting.' });
+    }
+    const config: DiscordConfig = {
+      webhookUrl: webhookUrl || '',
+      channelName: channelName || '',
+      serverName: serverName || '',
+      isEnabled: Boolean(isEnabled),
+      language: (language as DiscordConfig['language']) || 'both',
+      includeDevotionalSnippet: includeDevotionalSnippet !== false,
+    };
+    await saveDiscordConfig(config);
+    return res.json({ success: true, config });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to save Discord config.' });
+  }
+});
+
+app.get('/api/discord/logs', async (req, res) => {
+  try {
+    const logs = await getRecentDiscordDeliveries(15);
+    return res.json({ logs });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to load delivery history.' });
+  }
+});
+
+// Triggered once a day by Vercel Cron (see vercel.json). Guarded by
+// CRON_SECRET so this can't be used by anyone else to spam the configured
+// Discord channel on demand -- Vercel automatically sends this header on
+// requests it makes to scheduled cron paths.
+app.get('/api/discord/daily-post', async (req, res) => {
+  try {
+    if (process.env.CRON_SECRET) {
+      const authHeader = req.headers.authorization;
+      if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+    }
+
+    const config = await getDiscordConfig();
+    if (!config || !config.isEnabled || !config.webhookUrl) {
+      return res.json({ skipped: true, reason: 'Automatic daily posting is not enabled.' });
+    }
+
+    if (await hasSuccessfulDeliveryToday()) {
+      return res.json({ skipped: true, reason: 'Already posted today.' });
+    }
+
+    const verse = getVerseForDate();
+    const embedPayload = buildVerseEmbedPayload(verse, config.language);
+    const result = await sendToDiscordWebhook(config.webhookUrl, embedPayload);
+
+    if (!result.ok) {
+      await logDiscordDelivery({ sentAt: new Date().toISOString(), verseRef: verse.refEn, triggerSource: 'cron', status: 'error', errorMessage: result.error });
+      return res.status(502).json({ error: result.error });
+    }
+
+    await logDiscordDelivery({ sentAt: new Date().toISOString(), verseRef: verse.refEn, triggerSource: 'cron', status: 'success' });
+    return res.json({ success: true, verse });
+  } catch (err: any) {
+    await logDiscordDelivery({ sentAt: new Date().toISOString(), verseRef: 'unknown', triggerSource: 'cron', status: 'error', errorMessage: err.message }).catch(() => {});
+    return res.status(500).json({ error: err.message || 'Daily post failed.' });
   }
 });
 
@@ -402,7 +470,7 @@ client.on('interactionCreate', async interaction => {
       .setTitle(\`📖 Daily Scripture: \${verse.refEn} | \${verse.refAm}\`)
       .setColor(0xD97706)
       .addFields(
-        { name: 'English (KJV/WEB)', value: \`> "\${verse.en}"\` },
+        { name: 'English', value: \`> "\${verse.en}"\` },
         { name: 'አማርኛ (Amharic)', value: \`> "\${verse.am}"\` }
       )
       .setFooter({ text: 'Berean Bilingual Study Bible Bot' })
@@ -617,7 +685,7 @@ app.post('/api/audio/tts', async (req, res) => {
 // --- WORDPROJECT HUMAN NARRATION AUDIO STREAMING PROXY ---
 const WORDPROJECT_LANG_IDS: Record<string, number> = {
   am: 17, // Amharic
-  en: 1,  // English (KJV)
+  en: 1,  // English
   fr: 7,  // French (Louis Segond)
 };
 

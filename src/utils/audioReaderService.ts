@@ -455,7 +455,7 @@ class AudioReaderService {
     const streamUrl = `/api/audio/wordproject/${lang}/${bookNum}/${chapter}`;
     
     let langLabel = 'Amharic (አማርኛ)';
-    if (lang === 'en') langLabel = 'English (KJV)';
+    if (lang === 'en') langLabel = 'English';
     if (lang === 'fr') langLabel = 'Français (Louis Segond)';
 
     const displayTitle = `${bookName || bookId} ${chapter} • ${langLabel} (WordProject Human Audio)`;

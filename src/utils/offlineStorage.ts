@@ -1,4 +1,4 @@
-import { BookmarkItem, DiscordConfig, HighlightItem, NoteItem, PrayerItem, StudyPlan, SyncPayload, UserPlanProgress, UserStats } from '../types';
+import { BookmarkItem, HighlightItem, NoteItem, PrayerItem, StudyPlan, SyncPayload, UserPlanProgress, UserStats } from '../types';
 
 const STORAGE_KEYS = {
   HIGHLIGHTS: 'berean_highlights_v1',
@@ -8,7 +8,6 @@ const STORAGE_KEYS = {
   PLANS_PROGRESS: 'berean_plans_progress_v1',
   CUSTOM_PLANS: 'berean_custom_plans_v1',
   STATS: 'berean_stats_v1',
-  DISCORD_CONFIG: 'berean_discord_config_v1',
   AUTH_USER: 'berean_auth_user_v1',
   AUTH_TOKEN: 'berean_auth_token_v1',
   APP_LANG: 'berean_app_lang_v1',
@@ -33,17 +32,6 @@ function openBibleDb(): Promise<IDBDatabase> {
     request.onerror = () => reject(request.error);
   });
 }
-
-const DEFAULT_DISCORD_CONFIG: DiscordConfig = {
-  webhookUrl: '',
-  channelName: 'daily-scripture',
-  serverName: 'My Faith Community',
-  scheduledTime: '08:00',
-  isEnabled: false,
-  language: 'both',
-  verseCategory: 'daily',
-  includeDevotionalSnippet: true,
-};
 
 const DEFAULT_STATS: UserStats = {
   streakDays: 3,
@@ -304,18 +292,6 @@ export class StorageManager {
     }
   }
 
-  static getDiscordConfig(): DiscordConfig {
-    try {
-      const data = localStorage.getItem(STORAGE_KEYS.DISCORD_CONFIG);
-      return data ? JSON.parse(data) : DEFAULT_DISCORD_CONFIG;
-    } catch {
-      return DEFAULT_DISCORD_CONFIG;
-    }
-  }
-
-  static saveDiscordConfig(config: DiscordConfig): void {
-    localStorage.setItem(STORAGE_KEYS.DISCORD_CONFIG, JSON.stringify(config));
-  }
 
   // --- Offline Bible text cache (IndexedDB) ---
   // Real scripture is fetched from /bible/<BookId>.json and runs up to
@@ -365,7 +341,6 @@ export class StorageManager {
       plansProgress: this.getPlansProgress(),
       customPlans: this.getCustomPlans(),
       stats: this.getStats(),
-      discordConfig: this.getDiscordConfig()
     };
   }
 
@@ -377,6 +352,5 @@ export class StorageManager {
     if (payload.plansProgress) localStorage.setItem(STORAGE_KEYS.PLANS_PROGRESS, JSON.stringify(payload.plansProgress));
     if (payload.customPlans) localStorage.setItem(STORAGE_KEYS.CUSTOM_PLANS, JSON.stringify(payload.customPlans));
     if (payload.stats) localStorage.setItem(STORAGE_KEYS.STATS, JSON.stringify(payload.stats));
-    if (payload.discordConfig) localStorage.setItem(STORAGE_KEYS.DISCORD_CONFIG, JSON.stringify(payload.discordConfig));
   }
 }

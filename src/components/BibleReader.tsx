@@ -464,7 +464,7 @@ export const BibleReader: React.FC<BibleReaderProps> = ({
                       <span className="flex items-center gap-2">
                         <span>🇬🇧</span>
                         <div>
-                          <p className="font-semibold">English KJV (WordProject Audio)</p>
+                          <p className="font-semibold">English (WordProject Audio)</p>
                           <p className="text-[10px] text-stone-500">Classic Holy Scripture reading</p>
                         </div>
                       </span>

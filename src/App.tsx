@@ -223,7 +223,9 @@ export const App: React.FC = () => {
     handleCloudSync();
   };
 
-  // Discord Dispatchers
+  // Discord Dispatchers -- config is server-side now (a single global
+  // webhook, not per-user local storage), since the automatic daily post
+  // is triggered by a server-side cron job that has no access to the browser.
   const handleSendDiscordWebhook = async (cfg: DiscordConfig): Promise<{ success: boolean; message: string; verse?: any }> => {
     const res = await fetch('/api/discord/test-webhook', {
       method: 'POST',
@@ -231,7 +233,6 @@ export const App: React.FC = () => {
       body: JSON.stringify({
         webhookUrl: cfg.webhookUrl,
         language: cfg.language,
-        verseCategory: cfg.verseCategory,
         customMessage: cfg.includeDevotionalSnippet ? undefined : 'Sent via Berean Study Bible'
       })
     });
@@ -243,8 +244,9 @@ export const App: React.FC = () => {
   };
 
   const handleSendVerseToDiscord = async (verse: BibleVerse): Promise<{ success: boolean; message: string }> => {
-    const cfg = StorageManager.getDiscordConfig();
-    const webhookUrl = cfg.webhookUrl;
+    const cfgRes = await fetch('/api/discord/config');
+    const { config: cfg } = await cfgRes.json();
+    const webhookUrl = cfg?.webhookUrl;
     if (!webhookUrl) {
       throw new Error('Please configure a Discord Webhook URL in the Discord Bot Hub tab first.');
     }
@@ -349,8 +351,9 @@ export const App: React.FC = () => {
             lang={lang}
             onOpenPassageInBible={handleOpenPassageInBible}
             onSendDiscordVerse={async (ref) => {
-              const cfg = StorageManager.getDiscordConfig();
-              if (!cfg.webhookUrl) {
+              const cfgRes = await fetch('/api/discord/config');
+              const { config: cfg } = await cfgRes.json();
+              if (!cfg?.webhookUrl) {
                 throw new Error('Please configure a Discord Webhook URL in the Discord Bot Hub tab first.');
               }
               const res = await fetch('/api/discord/test-webhook', {
