@@ -73,8 +73,12 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           </div>
 
-          {/* Desktop Navigation Tabs */}
-          <nav className="hidden lg:flex items-center gap-1 bg-stone-800/80 p-1.5 rounded-xl border border-stone-700/60">
+          {/* Desktop Navigation Tabs -- min-w-0 lets this shrink below its
+              content width instead of pushing Sign In off-screen once there
+              are enough tabs to not fit (e.g. a ~1280px laptop with the
+              admin's extra Discord Bot Hub tab); overflow-x-auto turns it
+              into a scroll strip in that case, matching the mobile nav. */}
+          <nav className="hidden lg:flex items-center gap-1 bg-stone-800/80 p-1.5 rounded-xl border border-stone-700/60 min-w-0 overflow-x-auto no-scrollbar">
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = currentTab === item.id;
@@ -83,7 +87,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   key={item.id}
                   id={`nav-tab-${item.id}`}
                   onClick={() => setCurrentTab(item.id)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 ${
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium whitespace-nowrap shrink-0 transition-all duration-200 ${
                     isActive
                       ? 'bg-amber-600 text-white shadow-sm font-semibold'
                       : 'text-stone-300 hover:text-stone-100 hover:bg-stone-700/50'
@@ -96,8 +100,10 @@ export const Navbar: React.FC<NavbarProps> = ({
             })}
           </nav>
 
-          {/* Quick Actions (Language, Online/Sync, Streak, Account) */}
-          <div className="flex items-center gap-2 sm:gap-3">
+          {/* Quick Actions (Language, Online/Sync, Streak, Account) --
+              shrink-0 so this cluster (Sign In included) never gets
+              compressed or pushed out; the nav above absorbs the squeeze. */}
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             
             {/* Streak Counter */}
             <div 
