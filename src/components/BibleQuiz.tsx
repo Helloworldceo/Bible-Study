@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  BookOpen, Crown, Cross, Users, PenLine, Brain, Trophy,
+  BookOpen, Crown, Cross, Users, PenLine, Sparkles, Brain, Trophy,
   CheckCircle2, XCircle, ArrowRight, RotateCcw,
 } from 'lucide-react';
 import { Language, QuizSetProgress, UserStats } from '../types';
@@ -14,7 +14,7 @@ interface BibleQuizProps {
 }
 
 const SET_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
-  BookOpen, Crown, Cross, Users, PenLine,
+  BookOpen, Crown, Cross, Users, PenLine, Sparkles,
 };
 
 export const BibleQuiz: React.FC<BibleQuizProps> = ({ lang, stats, quizProgress, onComplete }) => {
