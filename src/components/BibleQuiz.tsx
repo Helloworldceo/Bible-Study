@@ -1,24 +1,27 @@
 import React, { useState } from 'react';
 import {
   BookOpen, Crown, Cross, Users, PenLine, Sparkles, Brain, Trophy,
-  CheckCircle2, XCircle, ArrowRight, RotateCcw,
+  CheckCircle2, XCircle, ArrowRight, RotateCcw, Grid3x3,
 } from 'lucide-react';
 import { Language, QuizSetProgress, UserStats } from '../types';
 import { QUIZ_SETS } from '../data/quizQuestions';
+import { BibleWordle } from './BibleWordle';
 
 interface BibleQuizProps {
   lang: Language;
   stats: UserStats;
   quizProgress: Record<string, QuizSetProgress>;
   onComplete: (setId: string, correctCount: number, totalQuestions: number) => void;
+  onWordleWin: (xpEarned: number) => void;
 }
 
 const SET_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   BookOpen, Crown, Cross, Users, PenLine, Sparkles,
 };
 
-export const BibleQuiz: React.FC<BibleQuizProps> = ({ lang, stats, quizProgress, onComplete }) => {
+export const BibleQuiz: React.FC<BibleQuizProps> = ({ lang, stats, quizProgress, onComplete, onWordleWin }) => {
   const isAm = lang === 'am';
+  const [mode, setMode] = useState<'quizzes' | 'wordle'>('quizzes');
   const [activeSetId, setActiveSetId] = useState<string | null>(null);
   const [questionIndex, setQuestionIndex] = useState(0);
   const [selectedChoice, setSelectedChoice] = useState<number | null>(null);
@@ -55,10 +58,44 @@ export const BibleQuiz: React.FC<BibleQuizProps> = ({ lang, stats, quizProgress,
     }
   };
 
+  const modeSwitcher = (
+    <div className="flex justify-center gap-2">
+      <button
+        onClick={() => setMode('quizzes')}
+        className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-1.5 transition-all ${
+          mode === 'quizzes' ? 'bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 shadow-sm' : 'bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400 hover:bg-stone-200 dark:hover:bg-stone-700'
+        }`}
+      >
+        <Brain className="w-4 h-4" />
+        <span>{isAm ? 'ጥያቄዎች' : 'Quizzes'}</span>
+      </button>
+      <button
+        onClick={() => setMode('wordle')}
+        className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-1.5 transition-all ${
+          mode === 'wordle' ? 'bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 shadow-sm' : 'bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400 hover:bg-stone-200 dark:hover:bg-stone-700'
+        }`}
+      >
+        <Grid3x3 className="w-4 h-4" />
+        <span>{isAm ? 'የቃላት እንቆቅልሽ' : 'Word Puzzle'}</span>
+      </button>
+    </div>
+  );
+
+  // --- Word Puzzle Mode ---
+  if (mode === 'wordle') {
+    return (
+      <div className="pt-6">
+        {modeSwitcher}
+        <BibleWordle lang={lang} onWin={onWordleWin} />
+      </div>
+    );
+  }
+
   // --- Set Selection Screen ---
   if (!activeSet) {
     return (
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-8 animate-in fade-in">
+        {modeSwitcher}
         <div className="flex flex-wrap items-center justify-between gap-4 p-6 sm:p-8 rounded-3xl bg-gradient-to-br from-amber-600 to-stone-900 text-white shadow-xl">
           <div>
             <div className="flex items-center gap-2 mb-1.5">

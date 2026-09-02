@@ -247,6 +247,13 @@ export class StorageManager {
     this.incrementStat('quizXP', correctCount * 10);
   }
 
+  // Wordle-style puzzle win -- same XP pool and streak treatment as a quiz
+  // set, just a different game.
+  static recordWordleWin(xpEarned: number): void {
+    this.recordDailyActivity();
+    this.incrementStat('quizXP', xpEarned);
+  }
+
   static incrementStat(key: keyof UserStats, amount = 1): void {
     const stats = this.getStats();
     if (typeof stats[key] === 'number') {

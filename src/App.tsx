@@ -252,6 +252,12 @@ export const App: React.FC = () => {
     handleCloudSync();
   };
 
+  const handleWordleWin = (xpEarned: number) => {
+    StorageManager.recordWordleWin(xpEarned);
+    setStats(StorageManager.getStats());
+    handleCloudSync();
+  };
+
   const handleSaveCustomPlan = (plan: StudyPlan) => {
     const updated = StorageManager.saveCustomPlan(plan);
     setCustomPlans([...updated]);
@@ -483,6 +489,7 @@ export const App: React.FC = () => {
             stats={stats}
             quizProgress={quizProgress}
             onComplete={handleQuizComplete}
+            onWordleWin={handleWordleWin}
           />
         )}
 
