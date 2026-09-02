@@ -48,15 +48,19 @@ function getGeminiClient(): GoogleGenAI {
   return aiClient;
 }
 
-// Gemini returns a transient 503 ("high demand") often enough in practice
-// that a single-shot call falls back to the generic canned response a
-// noticeable fraction of the time even with a perfectly valid key and
-// question -- confirmed while testing this against the live model. One
-// short retry turns that into a rare double-failure instead, without
-// risking the serverless function's execution time budget.
+// Gemini returns a transient 503 ("high demand") often enough on a free-tier
+// API key -- Google deprioritizes free-tier traffic first under load, so
+// this is expected, not a bug -- that a single-shot call falls back to the
+// generic canned response a noticeable fraction of the time even with a
+// valid key and a perfectly good question; confirmed live, including two
+// failures in a row often enough that one retry wasn't sufficient. Failed
+// attempts return near-instantly (only a *successful* generation takes
+// several seconds), so a few retries cost little time budget even though
+// the eventual win might not -- vercel.json sets maxDuration: 30 on this
+// function to give that room.
 async function generateContentWithRetry(
   params: Parameters<GoogleGenAI['models']['generateContent']>[0],
-  maxRetries = 1
+  maxRetries = 3
 ): ReturnType<GoogleGenAI['models']['generateContent']> {
   const gemini = getGeminiClient();
   let lastErr: any;

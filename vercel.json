@@ -1,7 +1,8 @@
 {
   "functions": {
     "api/index.ts": {
-      "includeFiles": "{server.ts,db.ts}"
+      "includeFiles": "{server.ts,db.ts}",
+      "maxDuration": 30
     }
   },
   "rewrites": [
