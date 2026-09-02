@@ -48,9 +48,9 @@ export const Navbar: React.FC<NavbarProps> = ({
     <header className="sticky top-0 z-40 bg-stone-900/95 text-stone-100 backdrop-blur-md border-b border-stone-800 shadow-md">
       <div className="max-w-7xl mx-auto px-3 sm:px-6">
         <div className="flex items-center justify-between h-16 sm:h-20 gap-2">
-          
+
           {/* Brand Logo & Name */}
-          <div 
+          <div
             onClick={() => setCurrentTab('bible')}
             className="flex items-center gap-3 cursor-pointer group select-none shrink-0"
             id="brand-logo-btn"
@@ -73,38 +73,11 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           </div>
 
-          {/* Desktop Navigation Tabs -- min-w-0 lets this shrink below its
-              content width instead of pushing Sign In off-screen once there
-              are enough tabs to not fit (e.g. a ~1280px laptop with the
-              admin's extra Discord Bot Hub tab); overflow-x-auto turns it
-              into a scroll strip in that case, matching the mobile nav. */}
-          <nav className="hidden lg:flex items-center gap-1 bg-stone-800/80 p-1.5 rounded-xl border border-stone-700/60 min-w-0 overflow-x-auto no-scrollbar">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = currentTab === item.id;
-              return (
-                <button
-                  key={item.id}
-                  id={`nav-tab-${item.id}`}
-                  onClick={() => setCurrentTab(item.id)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium whitespace-nowrap shrink-0 transition-all duration-200 ${
-                    isActive
-                      ? 'bg-amber-600 text-white shadow-sm font-semibold'
-                      : 'text-stone-300 hover:text-stone-100 hover:bg-stone-700/50'
-                  }`}
-                >
-                  <Icon className={`w-4 h-4 ${isActive ? 'text-amber-100' : 'text-stone-400'}`} />
-                  <span>{item.label}</span>
-                </button>
-              );
-            })}
-          </nav>
-
           {/* Quick Actions (Language, Online/Sync, Streak, Account) --
-              shrink-0 so this cluster (Sign In included) never gets
-              compressed or pushed out; the nav above absorbs the squeeze. */}
+              on their own row with just the logo now, so this never has to
+              compete with the nav tabs for space. */}
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-            
+
             {/* Streak Counter */}
             <div 
               title={`${streakDays} ${t.streak}`}
@@ -197,6 +170,34 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Desktop Navigation Tabs -- its own full-width row below the logo
+            and account cluster, so it never has to compete with them for
+            horizontal space. flex-wrap lets it spill onto a second line
+            instead of squeezing into a cramped scroll strip once there are
+            enough tabs (five plain, six for a logged-in admin) to not fit
+            on one line at typical laptop widths. */}
+        <nav className="hidden lg:flex flex-wrap items-center gap-1.5 pb-3">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = currentTab === item.id;
+            return (
+              <button
+                key={item.id}
+                id={`nav-tab-${item.id}`}
+                onClick={() => setCurrentTab(item.id)}
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                  isActive
+                    ? 'bg-amber-600 text-white shadow-sm font-semibold'
+                    : 'bg-stone-800/80 border border-stone-700/60 text-stone-300 hover:text-stone-100 hover:bg-stone-700/60'
+                }`}
+              >
+                <Icon className={`w-4 h-4 ${isActive ? 'text-amber-100' : 'text-stone-400'}`} />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
 
         {/* Mobile Sub-Navigation Bar */}
         <div className="lg:hidden flex items-center justify-between overflow-x-auto py-2.5 gap-2 border-t border-stone-800/80 no-scrollbar">
