@@ -210,4 +210,5 @@ export interface SyncPayload {
   plansProgress: Record<string, UserPlanProgress>;
   customPlans: StudyPlan[];
   stats: UserStats;
+  lastReadPosition?: { bookId: string; chapter: number };
 }

@@ -26,9 +26,11 @@ export const App: React.FC = () => {
     return (saved === 'am' ? 'am' : 'en') as Language;
   });
 
-  // Bible Reader Position
-  const [selectedBookId, setSelectedBookId] = useState<string>('GEN');
-  const [selectedChapter, setSelectedChapter] = useState<number>(1);
+  // Bible Reader Position -- resume where they left off instead of always
+  // reopening at Genesis 1 (also carried in the cloud sync payload so it
+  // follows a logged-in reader across devices, see handleLogin below).
+  const [selectedBookId, setSelectedBookId] = useState<string>(() => StorageManager.getLastReadPosition()?.bookId ?? 'GEN');
+  const [selectedChapter, setSelectedChapter] = useState<number>(() => StorageManager.getLastReadPosition()?.chapter ?? 1);
   const [activeVerseForModal, setActiveVerseForModal] = useState<BibleVerse | null>(null);
 
   // App Data State (Synced with localStorage and Cloud API)
@@ -115,14 +117,27 @@ export const App: React.FC = () => {
     }
   }, []);
 
+  // Track real reading activity (streak, chapters-read count, resume
+  // position) whenever the open chapter actually changes -- whether that's
+  // Next/Previous, the book/chapter/verse picker, or a cross-tab jump from
+  // Devotionals/Plans. This used to only fire from that last case, so
+  // normal reading never touched the streak at all.
+  useEffect(() => {
+    StorageManager.saveLastReadPosition(selectedBookId, selectedChapter);
+    StorageManager.recordReadingActivity(`${selectedBookId}.${selectedChapter}`);
+    setStats(StorageManager.getStats());
+    handleCloudSync();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBookId, selectedChapter]);
+
   // Quick helper to jump from Devotionals or Study Plans to the exact chapter in Bible Reader
   const handleOpenPassageInBible = (bookId: string, chapter: number) => {
+    // Reading activity is now tracked by the effect above, for every
+    // navigation path including this one -- no need to record it here too.
     setSelectedBookId(bookId);
     setSelectedChapter(chapter);
     setCurrentTab('bible');
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    StorageManager.recordReadingActivity(`${bookId}.${chapter}`);
-    setStats(StorageManager.getStats());
   };
 
   // Highlights handlers
@@ -286,6 +301,12 @@ export const App: React.FC = () => {
       setPrayers(StorageManager.getPrayers());
       setPlansProgress(StorageManager.getPlansProgress());
       setCustomPlans(StorageManager.getCustomPlans());
+      setStats(StorageManager.getStats());
+      const position = StorageManager.getLastReadPosition();
+      if (position) {
+        setSelectedBookId(position.bookId);
+        setSelectedChapter(position.chapter);
+      }
     }
     return { success: true };
   };

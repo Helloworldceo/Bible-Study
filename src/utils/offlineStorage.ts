@@ -8,6 +8,7 @@ const STORAGE_KEYS = {
   PLANS_PROGRESS: 'berean_plans_progress_v1',
   CUSTOM_PLANS: 'berean_custom_plans_v1',
   STATS: 'berean_stats_v1',
+  LAST_READ_POSITION: 'berean_last_read_position_v1',
   AUTH_USER: 'berean_auth_user_v1',
   AUTH_TOKEN: 'berean_auth_token_v1',
   APP_LANG: 'berean_app_lang_v1',
@@ -33,73 +34,20 @@ function openBibleDb(): Promise<IDBDatabase> {
   });
 }
 
+// Genuine empty state for a new user -- this used to ship fabricated
+// numbers (a 3-day streak, 14 chapters read, etc.) that had nothing to do
+// with anything the person had actually done, the same class of bug as the
+// fake bookmark/notes/prayers/plan-progress defaults below.
 const DEFAULT_STATS: UserStats = {
-  streakDays: 3,
-  lastActiveDate: new Date().toISOString().split('T')[0],
-  totalChaptersRead: 14,
-  totalNotesCount: 4,
-  totalPrayersCount: 6,
-  answeredPrayersCount: 2,
-  completedPlansCount: 1,
-  readingDates: [
-    new Date(Date.now() - 86400000 * 2).toISOString().split('T')[0],
-    new Date(Date.now() - 86400000).toISOString().split('T')[0],
-    new Date().toISOString().split('T')[0]
-  ]
+  streakDays: 0,
+  lastActiveDate: '',
+  totalChaptersRead: 0,
+  totalNotesCount: 0,
+  totalPrayersCount: 0,
+  answeredPrayersCount: 0,
+  completedPlansCount: 0,
+  readingDates: [],
 };
-
-// Initial starter seed notes & prayers for immediate delight
-const INITIAL_NOTES: NoteItem[] = [
-  {
-    id: 'note-1',
-    verseId: 'PSA.23.1',
-    bookId: 'PSA',
-    chapter: 23,
-    verse: 1,
-    title: 'The Shepherd’s Provision & Rest',
-    content: 'David understood that God does not just give things; God Himself is our Shepherd and ultimate satisfaction. In Amharic: "እግዚአብሔር እረኛዬ ነው፥ የሚያሳጣኝም የለም።" Resting in this truth today.',
-    category: 'Reflection',
-    tags: ['Peace', 'Trust', 'Shepherd', 'Amharic'],
-    createdAt: new Date(Date.now() - 86400000).toISOString(),
-    updatedAt: new Date(Date.now() - 86400000).toISOString(),
-  },
-  {
-    id: 'note-2',
-    verseId: 'JHN.1.1',
-    bookId: 'JHN',
-    chapter: 1,
-    verse: 1,
-    title: 'Christ the Pre-Existent Logos (ቃል)',
-    content: 'John connects Genesis 1 with Christ’s eternal divinity. "In the beginning was the Word, and the Word was with God, and the Word was God." In Ge\'ez / Amharic theological tradition, "ቃል" (Qal) reveals God\'s active self-disclosure in flesh.',
-    category: 'Study Note',
-    tags: ['Theology', 'Divinity of Jesus', 'Gospel of John'],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  }
-];
-
-const INITIAL_PRAYERS: PrayerItem[] = [
-  {
-    id: 'pray-1',
-    title: 'Daily Spiritual Wisdom & Guidance in Ministry',
-    description: 'Praying for open doors to share the Gospel in love, and for divine wisdom in balancing family, work, and Bible study.',
-    category: 'Guidance',
-    isAnswered: false,
-    createdAt: new Date(Date.now() - 86400000 * 4).toISOString(),
-    updatedAt: new Date(Date.now() - 86400000 * 4).toISOString(),
-  },
-  {
-    id: 'pray-2',
-    title: 'Healing for Aunt Martha & Family Peace',
-    description: 'Prayed for recovery after health complications and peace in our home.',
-    category: 'Healing',
-    isAnswered: true,
-    answeredDate: new Date(Date.now() - 86400000).toISOString().split('T')[0],
-    testimony: 'Doctor confirmed full recovery! Praise God for His miraculous grace and comforting presence.',
-    createdAt: new Date(Date.now() - 86400000 * 10).toISOString(),
-    updatedAt: new Date(Date.now() - 86400000).toISOString(),
-  }
-];
 
 export class StorageManager {
   static getHighlights(): HighlightItem[] {
@@ -128,20 +76,7 @@ export class StorageManager {
   static getBookmarks(): BookmarkItem[] {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.BOOKMARKS);
-      return data ? JSON.parse(data) : [
-        {
-          id: 'bm-1',
-          verseId: 'ROM.8.28',
-          bookId: 'ROM',
-          bookNameEn: 'Romans',
-          bookNameAm: 'ወደ ሮሜ ሰዎች',
-          chapter: 8,
-          verse: 28,
-          textEn: 'And we know that all things work together for good to those who love God...',
-          textAm: 'እግዚአብሔርንም ለሚወዱት እንደ አሳቡም ለተጠሩት ነገር ሁሉ ለበጎ እንዲደረግ እናውቃለን።',
-          createdAt: new Date().toISOString()
-        }
-      ];
+      return data ? JSON.parse(data) : [];
     } catch {
       return [];
     }
@@ -165,9 +100,9 @@ export class StorageManager {
   static getNotes(): NoteItem[] {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.NOTES);
-      return data ? JSON.parse(data) : INITIAL_NOTES;
+      return data ? JSON.parse(data) : [];
     } catch {
-      return INITIAL_NOTES;
+      return [];
     }
   }
 
@@ -193,9 +128,9 @@ export class StorageManager {
   static getPrayers(): PrayerItem[] {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.PRAYERS);
-      return data ? JSON.parse(data) : INITIAL_PRAYERS;
+      return data ? JSON.parse(data) : [];
     } catch {
-      return INITIAL_PRAYERS;
+      return [];
     }
   }
 
@@ -220,16 +155,7 @@ export class StorageManager {
   static getPlansProgress(): Record<string, UserPlanProgress> {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.PLANS_PROGRESS);
-      return data ? JSON.parse(data) : {
-        'plan-bible-year': {
-          planId: 'plan-bible-year',
-          startDate: new Date().toISOString(),
-          completedDays: [1, 2],
-          completedChapters: ['GEN.1', 'GEN.2', 'PSA.1', 'MAT.1'],
-          lastReadDay: 2,
-          isCompleted: false
-        }
-      };
+      return data ? JSON.parse(data) : {};
     } catch {
       return {};
     }
@@ -292,6 +218,22 @@ export class StorageManager {
     }
   }
 
+  // "Continue reading where you left off" -- without this, the reader
+  // always opens back at Genesis 1 on every reload, and (via
+  // export/importAllData below) on every other device too.
+  static getLastReadPosition(): { bookId: string; chapter: number } | null {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.LAST_READ_POSITION);
+      return data ? JSON.parse(data) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  static saveLastReadPosition(bookId: string, chapter: number): void {
+    localStorage.setItem(STORAGE_KEYS.LAST_READ_POSITION, JSON.stringify({ bookId, chapter }));
+  }
+
 
   // --- Offline Bible text cache (IndexedDB) ---
   // Real scripture is fetched from /bible/<BookId>.json and runs up to
@@ -341,6 +283,7 @@ export class StorageManager {
       plansProgress: this.getPlansProgress(),
       customPlans: this.getCustomPlans(),
       stats: this.getStats(),
+      lastReadPosition: this.getLastReadPosition() ?? undefined,
     };
   }
 
@@ -352,5 +295,6 @@ export class StorageManager {
     if (payload.plansProgress) localStorage.setItem(STORAGE_KEYS.PLANS_PROGRESS, JSON.stringify(payload.plansProgress));
     if (payload.customPlans) localStorage.setItem(STORAGE_KEYS.CUSTOM_PLANS, JSON.stringify(payload.customPlans));
     if (payload.stats) localStorage.setItem(STORAGE_KEYS.STATS, JSON.stringify(payload.stats));
+    if (payload.lastReadPosition) localStorage.setItem(STORAGE_KEYS.LAST_READ_POSITION, JSON.stringify(payload.lastReadPosition));
   }
 }
