@@ -112,6 +112,19 @@ export async function initDb(): Promise<void> {
       responded_at TIMESTAMPTZ
     )
   `;
+  // One row per browser/device that opted in -- endpoint is unique per
+  // subscription, so re-subscribing (e.g. permission granted again after
+  // being reset) just no-ops instead of creating a duplicate.
+  await getSql()`
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id SERIAL PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      endpoint TEXT NOT NULL UNIQUE,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
 }
 
 // --- Password hashing (salted scrypt -- the original code used unsalted
@@ -419,4 +432,53 @@ export async function removeFriendship(userId: string, friendId: string): Promis
       AND ((from_user_id = ${userId} AND to_user_id = ${friendId})
         OR (from_user_id = ${friendId} AND to_user_id = ${userId}))
   `;
+}
+
+// --- Web Push: daily streak-reminder subscriptions ---
+
+export interface PushSubscriptionRecord {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+}
+
+export async function savePushSubscription(userId: string, sub: PushSubscriptionRecord): Promise<void> {
+  await getSql()`
+    INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth)
+    VALUES (${userId}, ${sub.endpoint}, ${sub.p256dh}, ${sub.auth})
+    ON CONFLICT (endpoint) DO UPDATE SET user_id = EXCLUDED.user_id, p256dh = EXCLUDED.p256dh, auth = EXCLUDED.auth
+  `;
+}
+
+export async function deletePushSubscription(endpoint: string): Promise<void> {
+  await getSql()`DELETE FROM push_subscriptions WHERE endpoint = ${endpoint}`;
+}
+
+export interface ReminderTarget {
+  subscriptionId: number;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  userId: string;
+  name: string;
+}
+
+// Everyone subscribed who hasn't done anything countable today (UTC) yet --
+// reading a chapter, a quiz, or a word puzzle all write into the same
+// readingDates array, so this one check covers all three.
+export async function getSubscriptionsNeedingReminder(): Promise<ReminderTarget[]> {
+  const rows = (await getSql()`
+    SELECT ps.id AS subscription_id, ps.endpoint, ps.p256dh, ps.auth, u.id AS user_id, u.name
+    FROM push_subscriptions ps
+    JOIN users u ON u.id = ps.user_id
+    WHERE NOT COALESCE(u.data->'stats'->'readingDates' ? to_char(now(), 'YYYY-MM-DD'), false)
+  `) as { subscription_id: number; endpoint: string; p256dh: string; auth: string; user_id: string; name: string }[];
+  return rows.map((r) => ({
+    subscriptionId: r.subscription_id,
+    endpoint: r.endpoint,
+    p256dh: r.p256dh,
+    auth: r.auth,
+    userId: r.user_id,
+    name: r.name,
+  }));
 }

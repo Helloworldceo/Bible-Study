@@ -9,6 +9,7 @@
     { "source": "/api/(.*)", "destination": "/api" }
   ],
   "crons": [
-    { "path": "/api/discord/daily-post", "schedule": "0 8 * * *" }
+    { "path": "/api/discord/daily-post", "schedule": "0 8 * * *" },
+    { "path": "/api/push/daily-reminder", "schedule": "0 20 * * *" }
   ]
 }

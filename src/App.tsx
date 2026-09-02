@@ -12,6 +12,7 @@ import { VerseActionModal } from './components/VerseActionModal';
 import { AuthModal } from './components/AuthModal';
 import { AudioPlayerBar } from './components/AudioPlayerBar';
 import { InstallPrompt } from './components/InstallPrompt';
+import { NotificationPrompt } from './components/NotificationPrompt';
 
 import {
   BibleVerse, BookmarkItem, DiscordConfig, HighlightItem,
@@ -413,6 +414,11 @@ export const App: React.FC = () => {
           content down instead of floating over it (a fixed-position
           version collided with every tab's own colored hero banner). */}
       <InstallPrompt lang={lang} />
+
+      {/* Daily streak-reminder push opt-in -- same in-flow pattern as
+          InstallPrompt above, and only ever shows to a signed-in user with
+          no active subscription yet. */}
+      <NotificationPrompt lang={lang} user={user} />
 
       {/* Main View Router */}
       <div className="flex-1">

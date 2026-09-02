@@ -9,6 +9,7 @@ import { GoogleGenAI } from '@google/genai';
 // Vercel's Lambda runtime even though this codepath never actually runs
 // there (NODE_ENV is always 'production' on Vercel).
 import { OAuth2Client } from 'google-auth-library';
+import webpush from 'web-push';
 import {
   initDb,
   getUserByEmail,
@@ -36,6 +37,9 @@ import {
   respondToFriendRequest,
   getFriends,
   removeFriendship,
+  savePushSubscription,
+  deletePushSubscription,
+  getSubscriptionsNeedingReminder,
   type StoredUser,
   type DiscordConfig,
 } from './db.js'; // see the note in api/index.ts on why this extension is required
@@ -489,6 +493,91 @@ app.delete('/api/friends/:friendId', requireAuth, async (req, res) => {
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: err.message || 'Failed to remove friend.' });
+  }
+});
+
+// --- WEB PUSH: daily "keep your streak alive" reminders ---
+
+let vapidConfigured = false;
+function ensureVapidConfigured() {
+  if (vapidConfigured) return;
+  if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
+    throw new Error('VAPID keys are not configured on the server.');
+  }
+  webpush.setVapidDetails(
+    process.env.VAPID_SUBJECT || 'mailto:support@example.com',
+    process.env.VAPID_PUBLIC_KEY,
+    process.env.VAPID_PRIVATE_KEY
+  );
+  vapidConfigured = true;
+}
+
+app.post('/api/push/subscribe', requireAuth, async (req, res) => {
+  try {
+    ensureVapidConfigured();
+    const { endpoint, keys } = req.body?.subscription || req.body || {};
+    if (!endpoint || !keys?.p256dh || !keys?.auth) {
+      return res.status(400).json({ error: 'Invalid push subscription.' });
+    }
+    await savePushSubscription(req.authUser!.id, { endpoint, p256dh: keys.p256dh, auth: keys.auth });
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to save subscription.' });
+  }
+});
+
+app.post('/api/push/unsubscribe', requireAuth, async (req, res) => {
+  try {
+    const { endpoint } = req.body || {};
+    if (!endpoint) return res.status(400).json({ error: 'Missing endpoint.' });
+    await deletePushSubscription(endpoint);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to remove subscription.' });
+  }
+});
+
+// Triggered once a day by Vercel Cron (see vercel.json), same CRON_SECRET
+// guard as the Discord daily post. Reads readingDates directly off each
+// subscriber's synced stats -- reading a chapter, finishing a quiz, or
+// winning a word puzzle all write into that same array, so this one check
+// naturally covers all three.
+app.get('/api/push/daily-reminder', async (req, res) => {
+  try {
+    if (process.env.CRON_SECRET) {
+      const authHeader = req.headers.authorization;
+      if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+    }
+    ensureVapidConfigured();
+
+    const targets = await getSubscriptionsNeedingReminder();
+    let sent = 0;
+    let removed = 0;
+    for (const target of targets) {
+      try {
+        await webpush.sendNotification(
+          { endpoint: target.endpoint, keys: { p256dh: target.p256dh, auth: target.auth } },
+          JSON.stringify({
+            title: 'Keep your streak alive 🔥',
+            body: `${target.name.split(' ')[0]}, you haven't read today yet -- a single chapter keeps it going.`,
+            url: '/',
+          })
+        );
+        sent++;
+      } catch (err: any) {
+        // 404/410 means the browser revoked this subscription (uninstalled,
+        // permissions reset, etc.) -- stop trying to send to it forever.
+        if (err?.statusCode === 404 || err?.statusCode === 410) {
+          await deletePushSubscription(target.endpoint);
+          removed++;
+        }
+      }
+    }
+    return res.json({ success: true, targeted: targets.length, sent, removedStale: removed });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Daily reminder run failed.' });
   }
 });
 
