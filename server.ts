@@ -71,7 +71,12 @@ async function generateContentWithRetry(
       lastErr = err;
       const status = err?.status;
       const message = err?.message || '';
-      const isRetryable = status === 503 || status === 429 || /UNAVAILABLE|RESOURCE_EXHAUSTED/i.test(message);
+      // 503/UNAVAILABLE is genuine transient overload -- worth a quick retry.
+      // 429/RESOURCE_EXHAUSTED here specifically means the free tier's daily
+      // request quota (20/day for this model) is used up: retrying cannot
+      // possibly succeed until that resets, and only wastes time plus
+      // whatever sliver of quota might still be trickling back. Fail fast.
+      const isRetryable = status === 503 || /UNAVAILABLE/i.test(message);
       if (!isRetryable || attempt === maxRetries) throw err;
       await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
     }
