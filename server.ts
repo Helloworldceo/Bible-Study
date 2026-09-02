@@ -18,7 +18,6 @@ import {
   getUserIdByToken,
   hashPassword,
   verifyPassword,
-  seedDemoUserIfMissing,
   getDiscordConfig,
   saveDiscordConfig,
   logDiscordDelivery,
@@ -765,13 +764,12 @@ async function startServer() {
   // shouldn't be fatal *permanently* -- `ready` below is cached once per
   // Lambda instance, so if this threw, every request on that warm instance
   // would keep re-throwing the same stale error until the instance recycles,
-  // long after the underlying connection issue cleared. The tables/demo user
-  // only need to exist once; route handlers make their own DB calls per
-  // request regardless, so they'll surface a real, current error themselves
-  // if the database is genuinely unreachable.
+  // long after the underlying connection issue cleared. The tables only
+  // need to exist once; route handlers make their own DB calls per request
+  // regardless, so they'll surface a real, current error themselves if the
+  // database is genuinely unreachable.
   try {
     await initDb();
-    await seedDemoUserIfMissing();
   } catch (err) {
     console.warn('Startup DB init failed (will not block requests):', err);
   }

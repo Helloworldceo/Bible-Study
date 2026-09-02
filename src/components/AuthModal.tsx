@@ -29,9 +29,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   const t = useTranslation(lang);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
-  const [email, setEmail] = useState('davidabdisa40@gmail.com');
-  const [password, setPassword] = useState('password123');
-  const [name, setName] = useState('David Abdisa');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -65,13 +65,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleQuickDemoLogin = () => {
-    setEmail('davidabdisa40@gmail.com');
-    setPassword('password123');
-    setName('David Abdisa');
-    setAuthMode('login');
   };
 
   return (
@@ -242,17 +235,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <span>{authMode === 'login' ? t.signIn : t.createAccount}</span>
                 </button>
               </form>
-
-              {/* Demo Account Helper */}
-              <div className="pt-3 border-t border-stone-200 dark:border-stone-800 text-center">
-                <button
-                  type="button"
-                  onClick={handleQuickDemoLogin}
-                  className="text-xs text-amber-700 dark:text-amber-400 hover:underline font-medium"
-                >
-                  ✨ Fill Demo Credentials (davidabdisa40@gmail.com)
-                </button>
-              </div>
             </>
           )}
 

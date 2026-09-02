@@ -157,23 +157,6 @@ export async function getUserIdByToken(token: string): Promise<string | undefine
   return rows[0]?.user_id;
 }
 
-// Seed the demo account once, on first boot -- kept for the same instant
-// multi-device demo purpose the earlier in-memory version served.
-export async function seedDemoUserIfMissing(): Promise<void> {
-  if (await getUserByEmail('davidabdisa40@gmail.com')) return;
-  const { hash, salt } = hashPassword('password123');
-  await createUser({
-    id: 'user-berean-demo',
-    email: 'davidabdisa40@gmail.com',
-    name: 'David Abdisa',
-    passwordHash: hash,
-    passwordSalt: salt,
-    preferredLanguage: 'en',
-    createdAt: new Date().toISOString(),
-    lastSyncedAt: new Date().toISOString(),
-  });
-}
-
 // --- Discord daily-verse bot: server-side config + delivery history ---
 export interface DiscordConfig {
   webhookUrl: string;
