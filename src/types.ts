@@ -200,6 +200,7 @@ export interface UserProfile {
   createdAt: string;
   lastSyncedAt?: string;
   isGuest?: boolean;
+  isAdmin?: boolean;
 }
 
 export interface SyncPayload {

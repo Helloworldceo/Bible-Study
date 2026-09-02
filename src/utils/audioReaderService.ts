@@ -665,9 +665,13 @@ class AudioReaderService {
       }
 
       try {
+        const token = localStorage.getItem('berean_auth_token_v1');
         const res = await fetch('/api/audio/tts', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
           body: JSON.stringify({
             text: text,
             lang: lang,
@@ -729,9 +733,13 @@ class AudioReaderService {
     if (this.audioCache.has(cacheKey)) return;
 
     try {
+      const token = localStorage.getItem('berean_auth_token_v1');
       const res = await fetch('/api/audio/tts', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           text: nextText,
           lang: nextLang,

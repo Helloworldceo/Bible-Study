@@ -30,12 +30,16 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const t = useTranslation(lang);
 
+  // Discord Bot Hub controls the site's one shared webhook -- it's admin
+  // configuration, not a per-user feature, so regular visitors never see it
+  // as a tab at all (the API rejects them too, but hiding it here means
+  // they're not even invited to try).
   const navItems = [
     { id: 'bible', label: t.tabBible, icon: BookOpen },
     { id: 'devotionals', label: t.tabDevotionals, icon: Sparkles },
     { id: 'plans', label: t.tabPlans, icon: Calendar },
     { id: 'journal', label: t.tabJournal, icon: BookHeart },
-    { id: 'discord', label: t.tabDiscord, icon: MessageSquare },
+    ...(user?.isAdmin ? [{ id: 'discord', label: t.tabDiscord, icon: MessageSquare }] as const : []),
     { id: 'ai', label: t.tabAICompanion, icon: Bot },
   ] as const;
 

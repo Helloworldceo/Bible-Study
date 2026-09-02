@@ -49,6 +49,15 @@ export const App: React.FC = () => {
 
   // User Auth
   const [user, setUser] = useState<UserProfile | null>(null);
+
+  // Discord Bot Hub is admin-only server-side too (see requireAdmin in
+  // server.ts) -- this just makes sure a non-admin never gets stranded on
+  // that tab, e.g. if they were viewing it and then logged out.
+  useEffect(() => {
+    if (currentTab === 'discord' && !user?.isAdmin) {
+      setCurrentTab('bible');
+    }
+  }, [currentTab, user]);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
 
   // Persist language preference
@@ -242,9 +251,10 @@ export const App: React.FC = () => {
   // webhook, not per-user local storage), since the automatic daily post
   // is triggered by a server-side cron job that has no access to the browser.
   const handleSendDiscordWebhook = async (cfg: DiscordConfig): Promise<{ success: boolean; message: string; verse?: any }> => {
+    const token = localStorage.getItem('berean_auth_token_v1');
     const res = await fetch('/api/discord/test-webhook', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify({
         webhookUrl: cfg.webhookUrl,
         language: cfg.language,
@@ -259,7 +269,9 @@ export const App: React.FC = () => {
   };
 
   const handleSendVerseToDiscord = async (verse: BibleVerse): Promise<{ success: boolean; message: string }> => {
-    const cfgRes = await fetch('/api/discord/config');
+    const token = localStorage.getItem('berean_auth_token_v1');
+    const authHeader = token ? { Authorization: `Bearer ${token}` } : {};
+    const cfgRes = await fetch('/api/discord/config', { headers: authHeader });
     const { config: cfg } = await cfgRes.json();
     const webhookUrl = cfg?.webhookUrl;
     if (!webhookUrl) {
@@ -268,7 +280,7 @@ export const App: React.FC = () => {
 
     const res = await fetch('/api/discord/test-webhook', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeader },
       body: JSON.stringify({
         webhookUrl: webhookUrl,
         language: cfg.language || 'both',
@@ -282,15 +294,11 @@ export const App: React.FC = () => {
   };
 
   // Auth actions
-  const handleLogin = async (email: string, pass: string) => {
-    const res = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password: pass })
-    });
-    const data = await res.json();
-    if (!res.ok) return { success: false, error: data.error };
 
+  // Shared by login, register, and Google sign-in -- stores the session
+  // token, updates the user in state, and (when the account already had
+  // synced data, i.e. login/Google on a returning account) restores it.
+  const applyAuthResponse = (data: { token: string; user: UserProfile; cloudData?: any }) => {
     localStorage.setItem('berean_auth_token_v1', data.token);
     setUser(data.user);
     if (data.cloudData) {
@@ -308,6 +316,17 @@ export const App: React.FC = () => {
         setSelectedChapter(position.chapter);
       }
     }
+  };
+
+  const handleLogin = async (email: string, pass: string) => {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: pass })
+    });
+    const data = await res.json();
+    if (!res.ok) return { success: false, error: data.error };
+    applyAuthResponse(data);
     return { success: true };
   };
 
@@ -323,6 +342,18 @@ export const App: React.FC = () => {
     localStorage.setItem('berean_auth_token_v1', data.token);
     setUser(data.user);
     handleCloudSync();
+    return { success: true };
+  };
+
+  const handleGoogleLogin = async (credential: string) => {
+    const res = await fetch('/api/auth/google', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credential })
+    });
+    const data = await res.json();
+    if (!res.ok) return { success: false, error: data.error };
+    applyAuthResponse(data);
     return { success: true };
   };
 
@@ -434,7 +465,7 @@ export const App: React.FC = () => {
           />
         )}
 
-        {currentTab === 'discord' && (
+        {currentTab === 'discord' && user?.isAdmin && (
           <DiscordBotHub
             lang={lang}
             onSendWebhookTest={handleSendDiscordWebhook}
@@ -444,6 +475,8 @@ export const App: React.FC = () => {
         {currentTab === 'ai' && (
           <AIStudyCompanion
             lang={lang}
+            user={user}
+            onOpenAuth={() => setIsAuthModalOpen(true)}
             onSaveToJournal={(title, content) => {
               const newNote: NoteItem = {
                 id: `note-ai-${Date.now()}`,
@@ -467,6 +500,8 @@ export const App: React.FC = () => {
         verse={activeVerseForModal}
         onClose={() => setActiveVerseForModal(null)}
         lang={lang}
+        user={user}
+        onOpenAuth={() => setIsAuthModalOpen(true)}
         onSaveNote={handleSaveVerseNote}
         onToggleBookmark={handleToggleBookmark}
         isBookmarked={activeVerseForModal ? bookmarkedIds.includes(activeVerseForModal.id) : false}
@@ -484,6 +519,7 @@ export const App: React.FC = () => {
         user={user}
         onLogin={handleLogin}
         onRegister={handleRegister}
+        onGoogleLogin={handleGoogleLogin}
         onLogout={handleLogout}
       />
 

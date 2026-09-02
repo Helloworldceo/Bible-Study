@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { X, Highlighter, Bookmark, FileText, Sparkles, Send, Copy, Volume2, Check, ExternalLink, BookOpen, Play, Pause, Globe, Music } from 'lucide-react';
-import { BibleVerse, HighlightItem, Language } from '../types';
+import { BibleVerse, HighlightItem, Language, UserProfile } from '../types';
 import { useTranslation } from '../utils/translations';
 import { StorageManager } from '../utils/offlineStorage';
 import { audioReader, AudioLangMode } from '../utils/audioReaderService';
@@ -9,6 +9,8 @@ interface VerseActionModalProps {
   verse: BibleVerse | null;
   onClose: () => void;
   lang: Language;
+  user: UserProfile | null;
+  onOpenAuth: () => void;
   onSaveNote: (verse: BibleVerse, title: string, content: string, category: any, tags: string[]) => void;
   onToggleBookmark: (verse: BibleVerse) => void;
   isBookmarked: boolean;
@@ -22,6 +24,8 @@ export const VerseActionModal: React.FC<VerseActionModalProps> = ({
   verse,
   onClose,
   lang,
+  user,
+  onOpenAuth,
   onSaveNote,
   onToggleBookmark,
   isBookmarked,
@@ -82,11 +86,19 @@ export const VerseActionModal: React.FC<VerseActionModalProps> = ({
   };
 
   const fetchAIExplanation = async () => {
+    if (!user) {
+      onOpenAuth();
+      return;
+    }
     setIsExplaining(true);
     try {
+      const token = localStorage.getItem('berean_auth_token_v1');
       const res = await fetch('/api/gemini/explain-verse', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           verseRef: `${verse.bookNameEn} ${verse.chapter}:${verse.verse} (${verse.bookNameAm})`,
           verseEn: verse.textEn,
@@ -94,6 +106,10 @@ export const VerseActionModal: React.FC<VerseActionModalProps> = ({
           lang: lang
         })
       });
+      if (res.status === 401) {
+        onOpenAuth();
+        return;
+      }
       const data = await res.json();
       if (data.result) {
         setAiResult(data.result);
@@ -198,17 +214,19 @@ export const VerseActionModal: React.FC<VerseActionModalProps> = ({
             <FileText className="w-4 h-4" />
             <span>Add Reflection</span>
           </button>
-          <button
-            onClick={() => setActiveTab('discord')}
-            className={`py-3 border-b-2 transition-colors flex items-center gap-1.5 ${
-              activeTab === 'discord'
-                ? 'border-amber-600 text-amber-700 dark:text-amber-400 font-semibold'
-                : 'border-transparent text-stone-500 hover:text-stone-800 dark:hover:text-stone-300'
-            }`}
-          >
-            <Send className="w-4 h-4 text-indigo-500" />
-            <span>Discord</span>
-          </button>
+          {user?.isAdmin && (
+            <button
+              onClick={() => setActiveTab('discord')}
+              className={`py-3 border-b-2 transition-colors flex items-center gap-1.5 ${
+                activeTab === 'discord'
+                  ? 'border-amber-600 text-amber-700 dark:text-amber-400 font-semibold'
+                  : 'border-transparent text-stone-500 hover:text-stone-800 dark:hover:text-stone-300'
+              }`}
+            >
+              <Send className="w-4 h-4 text-indigo-500" />
+              <span>Discord</span>
+            </button>
+          )}
         </div>
 
         {/* Tab Content */}
@@ -438,7 +456,7 @@ export const VerseActionModal: React.FC<VerseActionModalProps> = ({
                     onClick={fetchAIExplanation}
                     className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs sm:text-sm font-semibold shadow-md transition-colors"
                   >
-                    Generate AI Theological Analysis
+                    {user ? 'Generate AI Theological Analysis' : 'Sign In to Generate AI Theological Analysis'}
                   </button>
                 </div>
               )}
@@ -524,8 +542,8 @@ export const VerseActionModal: React.FC<VerseActionModalProps> = ({
             </form>
           )}
 
-          {/* TAB 4: Discord Dispatch */}
-          {activeTab === 'discord' && (
+          {/* TAB 4: Discord Dispatch -- admin-only, see requireAdmin in server.ts */}
+          {activeTab === 'discord' && user?.isAdmin && (
             <div className="space-y-4">
               <p className="text-xs text-stone-600 dark:text-stone-400">
                 Instantly dispatch this verse card as a rich embed to your configured Discord channel.

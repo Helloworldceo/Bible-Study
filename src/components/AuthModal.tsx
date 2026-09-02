@@ -1,10 +1,23 @@
-import React, { useState } from 'react';
-import { 
-  X, ShieldCheck, Lock, Mail, User, Check, AlertCircle, 
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  X, ShieldCheck, Lock, Mail, User, Check, AlertCircle,
   Sparkles, RefreshCw, KeyRound, LogOut
 } from 'lucide-react';
 import { Language, UserProfile } from '../types';
 import { useTranslation } from '../utils/translations';
+
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize: (config: { client_id: string; callback: (response: { credential: string }) => void }) => void;
+          renderButton: (parent: HTMLElement, options: Record<string, unknown>) => void;
+        };
+      };
+    };
+  }
+}
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -13,6 +26,7 @@ interface AuthModalProps {
   user: UserProfile | null;
   onLogin: (email: string, pass: string) => Promise<{ success: boolean; error?: string }>;
   onRegister: (email: string, pass: string, name: string) => Promise<{ success: boolean; error?: string }>;
+  onGoogleLogin: (credential: string) => Promise<{ success: boolean; error?: string }>;
   onLogout: () => void;
 }
 
@@ -23,10 +37,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   user,
   onLogin,
   onRegister,
+  onGoogleLogin,
   onLogout,
 }) => {
-  if (!isOpen) return null;
-
   const t = useTranslation(lang);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
@@ -35,6 +48,50 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const googleButtonRef = useRef<HTMLDivElement>(null);
+
+  // Google's script (loaded in index.html) needs a live DOM node to render
+  // its own button into -- re-run whenever the form (vs. the logged-in
+  // profile view) is what's actually on screen.
+  useEffect(() => {
+    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
+    if (!isOpen || user || !clientId || !googleButtonRef.current) return;
+
+    const renderGoogleButton = () => {
+      if (!window.google || !googleButtonRef.current) return false;
+      window.google.accounts.id.initialize({
+        client_id: clientId,
+        callback: async (response) => {
+          setLoading(true);
+          setErrorMsg(null);
+          const res = await onGoogleLogin(response.credential);
+          setLoading(false);
+          if (!res.success) {
+            setErrorMsg(res.error || 'Google sign-in failed.');
+          } else {
+            setSuccessMsg('Successfully signed in with Google!');
+            setTimeout(() => onClose(), 1200);
+          }
+        },
+      });
+      window.google.accounts.id.renderButton(googleButtonRef.current, {
+        theme: 'outline',
+        size: 'large',
+        width: 320,
+        text: authMode === 'login' ? 'signin_with' : 'signup_with',
+      });
+      return true;
+    };
+
+    if (!renderGoogleButton()) {
+      // The script has `defer` and loads before this component's own bundle,
+      // but retry briefly in case of a slow connection.
+      const interval = setInterval(() => { if (renderGoogleButton()) clearInterval(interval); }, 300);
+      return () => clearInterval(interval);
+    }
+  }, [isOpen, user, authMode]);
+
+  if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -169,6 +226,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs flex items-center gap-2 font-medium">
                   <Check className="w-4 h-4 text-emerald-500 shrink-0" />
                   <span>{successMsg}</span>
+                </div>
+              )}
+
+              {import.meta.env.VITE_GOOGLE_CLIENT_ID && (
+                <div className="space-y-3">
+                  <div className="flex justify-center" ref={googleButtonRef} />
+                  <div className="flex items-center gap-3 text-[11px] text-stone-400 dark:text-stone-500">
+                    <div className="flex-1 h-px bg-stone-200 dark:bg-stone-700" />
+                    <span>OR</span>
+                    <div className="flex-1 h-px bg-stone-200 dark:bg-stone-700" />
+                  </div>
                 </div>
               )}
 

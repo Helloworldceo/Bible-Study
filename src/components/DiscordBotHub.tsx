@@ -38,8 +38,15 @@ export const DiscordBotHub: React.FC<DiscordBotHubProps> = ({
   // Config and delivery history now live server-side (a single global
   // config, not per-browser) -- this is what makes the daily cron post
   // actually possible: it has no access to a browser's local storage.
+  // Admin-only server-side (see requireAdmin in server.ts), so every
+  // request here needs the signed-in admin's token.
+  const authHeaders = (): HeadersInit => {
+    const token = localStorage.getItem('berean_auth_token_v1');
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
   const loadConfig = () => {
-    fetch('/api/discord/config')
+    fetch('/api/discord/config', { headers: authHeaders() })
       .then(res => res.json())
       .then(data => { if (data.config) setConfig(data.config); })
       .catch(console.error)
@@ -47,7 +54,7 @@ export const DiscordBotHub: React.FC<DiscordBotHubProps> = ({
   };
 
   const loadLogs = () => {
-    fetch('/api/discord/logs')
+    fetch('/api/discord/logs', { headers: authHeaders() })
       .then(res => res.json())
       .then(data => { if (data.logs) setDeliveryLogs(data.logs); })
       .catch(console.error);
@@ -68,7 +75,7 @@ export const DiscordBotHub: React.FC<DiscordBotHubProps> = ({
     try {
       const res = await fetch('/api/discord/config', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify(config),
       });
       const data = await res.json();

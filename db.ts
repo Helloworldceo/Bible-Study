@@ -5,8 +5,11 @@ export interface StoredUser {
   id: string;
   email: string;
   name: string;
-  passwordHash: string;
-  passwordSalt: string;
+  // Absent for Google-only accounts -- there's no password to verify against.
+  passwordHash?: string;
+  passwordSalt?: string;
+  googleId?: string;
+  isAdmin: boolean;
   preferredLanguage: 'en' | 'am';
   createdAt: string;
   lastSyncedAt?: string;
@@ -39,14 +42,23 @@ export async function initDb(): Promise<void> {
       id TEXT PRIMARY KEY,
       email TEXT UNIQUE NOT NULL,
       name TEXT NOT NULL,
-      password_hash TEXT NOT NULL,
-      password_salt TEXT NOT NULL,
+      password_hash TEXT,
+      password_salt TEXT,
+      google_id TEXT UNIQUE,
+      is_admin BOOLEAN NOT NULL DEFAULT false,
       preferred_language TEXT NOT NULL DEFAULT 'en',
       created_at TIMESTAMPTZ NOT NULL,
       last_synced_at TIMESTAMPTZ,
       data JSONB
     )
   `;
+  // The table above only applies to a fresh database -- these bring an
+  // already-deployed one (password columns NOT NULL, no google_id/is_admin)
+  // up to the same shape. All idempotent, safe to run on every boot.
+  await getSql()`ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL`;
+  await getSql()`ALTER TABLE users ALTER COLUMN password_salt DROP NOT NULL`;
+  await getSql()`ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id TEXT UNIQUE`;
+  await getSql()`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false`;
   await getSql()`
     CREATE TABLE IF NOT EXISTS tokens (
       token TEXT PRIMARY KEY,
@@ -105,8 +117,10 @@ interface UserRow {
   id: string;
   email: string;
   name: string;
-  password_hash: string;
-  password_salt: string;
+  password_hash: string | null;
+  password_salt: string | null;
+  google_id: string | null;
+  is_admin: boolean;
   preferred_language: string;
   created_at: string;
   last_synced_at: string | null;
@@ -118,8 +132,10 @@ function rowToUser(row: UserRow): StoredUser {
     id: row.id,
     email: row.email,
     name: row.name,
-    passwordHash: row.password_hash,
-    passwordSalt: row.password_salt,
+    passwordHash: row.password_hash ?? undefined,
+    passwordSalt: row.password_salt ?? undefined,
+    googleId: row.google_id ?? undefined,
+    isAdmin: row.is_admin,
     preferredLanguage: row.preferred_language as 'en' | 'am',
     createdAt: row.created_at,
     lastSyncedAt: row.last_synced_at ?? undefined,
@@ -137,11 +153,32 @@ export async function getUserById(id: string): Promise<StoredUser | undefined> {
   return rows[0] ? rowToUser(rows[0]) : undefined;
 }
 
+export async function getUserByGoogleId(googleId: string): Promise<StoredUser | undefined> {
+  const rows = (await getSql()`SELECT * FROM users WHERE google_id = ${googleId}`) as UserRow[];
+  return rows[0] ? rowToUser(rows[0]) : undefined;
+}
+
+// Whoever registers first (by any method) becomes the site's one admin
+// account -- there's no invite flow or role management UI, so this is the
+// entire bootstrap mechanism. Safe as long as the admin claims it promptly
+// after deploying, since the database starts empty.
+export async function getUserCount(): Promise<number> {
+  const rows = (await getSql()`SELECT COUNT(*)::int AS count FROM users`) as { count: number }[];
+  return rows[0]?.count ?? 0;
+}
+
 export async function createUser(user: StoredUser): Promise<void> {
   await getSql()`
-    INSERT INTO users (id, email, name, password_hash, password_salt, preferred_language, created_at, last_synced_at, data)
-    VALUES (${user.id}, ${user.email}, ${user.name}, ${user.passwordHash}, ${user.passwordSalt}, ${user.preferredLanguage}, ${user.createdAt}, ${user.lastSyncedAt ?? null}, ${user.data ? JSON.stringify(user.data) : null})
+    INSERT INTO users (id, email, name, password_hash, password_salt, google_id, is_admin, preferred_language, created_at, last_synced_at, data)
+    VALUES (${user.id}, ${user.email}, ${user.name}, ${user.passwordHash ?? null}, ${user.passwordSalt ?? null}, ${user.googleId ?? null}, ${user.isAdmin}, ${user.preferredLanguage}, ${user.createdAt}, ${user.lastSyncedAt ?? null}, ${user.data ? JSON.stringify(user.data) : null})
   `;
+}
+
+// Links a Google identity to an existing email/password account the first
+// time someone signs in with Google using the same email they already
+// registered with -- so they end up with one account, not two.
+export async function linkGoogleAccount(userId: string, googleId: string): Promise<void> {
+  await getSql()`UPDATE users SET google_id = ${googleId} WHERE id = ${userId}`;
 }
 
 export async function updateUserData(userId: string, data: any, syncedAt: string): Promise<void> {

@@ -8,11 +8,15 @@ import { GoogleGenAI } from '@google/genai';
 // platform-specific native binary) unconditionally, which crashes on
 // Vercel's Lambda runtime even though this codepath never actually runs
 // there (NODE_ENV is always 'production' on Vercel).
+import { OAuth2Client } from 'google-auth-library';
 import {
   initDb,
   getUserByEmail,
   getUserById,
+  getUserByGoogleId,
+  getUserCount,
   createUser,
+  linkGoogleAccount,
   updateUserData,
   createToken,
   getUserIdByToken,
@@ -23,6 +27,7 @@ import {
   logDiscordDelivery,
   getRecentDiscordDeliveries,
   hasSuccessfulDeliveryToday,
+  type StoredUser,
   type DiscordConfig,
 } from './db.js'; // see the note in api/index.ts on why this extension is required
 import { DISCORD_VERSE_POOL, getVerseForDate, type DiscordVerse } from './discordVerses.js';
@@ -99,6 +104,61 @@ async function generateContentWithRetry(
 // day-based picker used by the automatic cron post below.
 
 // --- AUTH API ROUTES ---
+
+// Shape sent to the client -- never the password hash/salt or Google
+// subject id, just what the UI needs to render account state.
+function toPublicUser(user: StoredUser) {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    preferredLanguage: user.preferredLanguage,
+    createdAt: user.createdAt,
+    lastSyncedAt: user.lastSyncedAt,
+    isAdmin: user.isAdmin,
+  };
+}
+
+// There's no invite flow or admin UI -- the first account created, by any
+// method, becomes the site's one admin. Everyone after that is a regular
+// user. See getUserCount() in db.ts for the caveat this relies on.
+async function determineIsAdmin(): Promise<boolean> {
+  return (await getUserCount()) === 0;
+}
+
+declare global {
+  namespace Express {
+    interface Request {
+      authUser?: StoredUser;
+    }
+  }
+}
+
+async function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  try {
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
+    const userId = token ? await getUserIdByToken(token) : undefined;
+    const user = userId ? await getUserById(userId) : undefined;
+    if (!user) {
+      return res.status(401).json({ error: 'Please sign in to continue.' });
+    }
+    req.authUser = user;
+    next();
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Authentication check failed.' });
+  }
+}
+
+async function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
+  await requireAuth(req, res, () => {
+    if (!req.authUser?.isAdmin) {
+      return res.status(403).json({ error: 'This area is restricted to the site admin.' });
+    }
+    next();
+  });
+}
+
 app.post('/api/auth/register', async (req, res) => {
   try {
     const { email, password, name, preferredLanguage } = req.body;
@@ -111,12 +171,13 @@ app.post('/api/auth/register', async (req, res) => {
     }
 
     const { hash, salt } = hashPassword(password);
-    const newUser = {
+    const newUser: StoredUser = {
       id: `user-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
       email: normalizedEmail,
       name: name.trim(),
       passwordHash: hash,
       passwordSalt: salt,
+      isAdmin: await determineIsAdmin(),
       preferredLanguage: (preferredLanguage || 'en') as 'en' | 'am',
       createdAt: new Date().toISOString(),
       lastSyncedAt: new Date().toISOString(),
@@ -126,17 +187,7 @@ app.post('/api/auth/register', async (req, res) => {
     const token = crypto.randomBytes(32).toString('hex');
     await createToken(token, newUser.id);
 
-    return res.json({
-      token,
-      user: {
-        id: newUser.id,
-        email: newUser.email,
-        name: newUser.name,
-        preferredLanguage: newUser.preferredLanguage,
-        createdAt: newUser.createdAt,
-        lastSyncedAt: newUser.lastSyncedAt,
-      }
-    });
+    return res.json({ token, user: toPublicUser(newUser) });
   } catch (err: any) {
     return res.status(500).json({ error: err.message || 'Registration failed' });
   }
@@ -150,7 +201,10 @@ app.post('/api/auth/login', async (req, res) => {
     }
     const normalizedEmail = email.toLowerCase().trim();
     const user = await getUserByEmail(normalizedEmail);
-    if (!user || !verifyPassword(password, user.passwordHash, user.passwordSalt)) {
+    if (!user || !user.passwordHash || !user.passwordSalt) {
+      return res.status(401).json({ error: 'Invalid email or password.' });
+    }
+    if (!verifyPassword(password, user.passwordHash, user.passwordSalt)) {
       return res.status(401).json({ error: 'Invalid email or password.' });
     }
 
@@ -159,14 +213,7 @@ app.post('/api/auth/login', async (req, res) => {
 
     return res.json({
       token,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        preferredLanguage: user.preferredLanguage,
-        createdAt: user.createdAt,
-        lastSyncedAt: user.lastSyncedAt,
-      },
+      user: toPublicUser(user),
       cloudData: user.data || null
     });
   } catch (err: any) {
@@ -174,32 +221,79 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-app.get('/api/auth/me', async (req, res) => {
-  try {
-    const authHeader = req.headers.authorization;
-    const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
-    const userId = token ? await getUserIdByToken(token) : undefined;
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized or invalid token' });
+// Google Sign-In -- verifies the ID token Google's client library hands
+// back to the browser, then finds or creates the matching account. Someone
+// who already registered with email/password and signs in with Google
+// using the same address gets linked to their existing account rather than
+// a second, empty one.
+let googleClient: OAuth2Client | null = null;
+function getGoogleClient(): OAuth2Client {
+  if (!googleClient) {
+    if (!process.env.GOOGLE_CLIENT_ID) {
+      throw new Error('GOOGLE_CLIENT_ID is not configured on the server.');
     }
-    const user = await getUserById(userId);
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+    googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+  }
+  return googleClient;
+}
+
+app.post('/api/auth/google', async (req, res) => {
+  try {
+    const { credential } = req.body;
+    if (!credential) {
+      return res.status(400).json({ error: 'Missing Google credential.' });
     }
 
-    return res.json({
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        preferredLanguage: user.preferredLanguage,
-        createdAt: user.createdAt,
-        lastSyncedAt: user.lastSyncedAt,
+    const ticket = await getGoogleClient().verifyIdToken({
+      idToken: credential,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    const payload = ticket.getPayload();
+    if (!payload?.email || !payload.email_verified) {
+      return res.status(401).json({ error: 'Google account has no verified email.' });
+    }
+
+    const googleId = payload.sub;
+    const normalizedEmail = payload.email.toLowerCase().trim();
+
+    let user = await getUserByGoogleId(googleId);
+    if (!user) {
+      const existingByEmail = await getUserByEmail(normalizedEmail);
+      if (existingByEmail) {
+        await linkGoogleAccount(existingByEmail.id, googleId);
+        user = { ...existingByEmail, googleId };
+      } else {
+        const newUser: StoredUser = {
+          id: `user-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+          email: normalizedEmail,
+          name: payload.name || normalizedEmail.split('@')[0],
+          googleId,
+          isAdmin: await determineIsAdmin(),
+          preferredLanguage: 'en',
+          createdAt: new Date().toISOString(),
+          lastSyncedAt: new Date().toISOString(),
+        };
+        await createUser(newUser);
+        user = newUser;
       }
+    }
+
+    const token = crypto.randomBytes(32).toString('hex');
+    await createToken(token, user.id);
+
+    return res.json({
+      token,
+      user: toPublicUser(user),
+      cloudData: user.data || null,
     });
   } catch (err: any) {
-    return res.status(500).json({ error: err.message || 'Failed to fetch account' });
+    console.error('Google Sign-In error:', err);
+    return res.status(401).json({ error: 'Could not verify Google sign-in.' });
   }
+});
+
+app.get('/api/auth/me', requireAuth, async (req, res) => {
+  return res.json({ user: toPublicUser(req.authUser!) });
 });
 
 // --- MULTI-DEVICE CLOUD SYNC ---
@@ -299,7 +393,7 @@ async function sendToDiscordWebhook(webhookUrl: string, payload: unknown): Promi
   return { ok: true };
 }
 
-app.post('/api/discord/test-webhook', async (req, res) => {
+app.post('/api/discord/test-webhook', requireAdmin, async (req, res) => {
   try {
     const { webhookUrl, language = 'both', customMessage, verseRef } = req.body;
 
@@ -334,7 +428,7 @@ app.post('/api/discord/test-webhook', async (req, res) => {
 
 // Server-side config (single global row) -- what the daily cron job reads,
 // unlike the old browser-localStorage version it replaces.
-app.get('/api/discord/config', async (req, res) => {
+app.get('/api/discord/config', requireAdmin, async (req, res) => {
   try {
     const config = await getDiscordConfig();
     return res.json({
@@ -347,7 +441,7 @@ app.get('/api/discord/config', async (req, res) => {
   }
 });
 
-app.post('/api/discord/config', async (req, res) => {
+app.post('/api/discord/config', requireAdmin, async (req, res) => {
   try {
     const { webhookUrl, channelName, serverName, isEnabled, language, includeDevotionalSnippet } = req.body as Partial<DiscordConfig>;
     if (isEnabled && (!webhookUrl || !webhookUrl.startsWith('https://discord.com/api/webhooks/'))) {
@@ -368,7 +462,7 @@ app.post('/api/discord/config', async (req, res) => {
   }
 });
 
-app.get('/api/discord/logs', async (req, res) => {
+app.get('/api/discord/logs', requireAdmin, async (req, res) => {
   try {
     const logs = await getRecentDiscordDeliveries(15);
     return res.json({ logs });
@@ -485,7 +579,7 @@ client.login(process.env.DISCORD_BOT_TOKEN);
 });
 
 // --- GEMINI 3.7 AI THEOLOGICAL ASSISTANT ---
-app.post('/api/gemini/explain-verse', async (req, res) => {
+app.post('/api/gemini/explain-verse', requireAuth, async (req, res) => {
   try {
     const { verseRef, verseEn, verseAm, lang = 'en' } = req.body;
 
@@ -556,7 +650,7 @@ Provide detailed theological study notes in ${lang === 'am' ? 'Amharic (with Ge\
   }
 });
 
-app.post('/api/gemini/study-qa', async (req, res) => {
+app.post('/api/gemini/study-qa', requireAuth, async (req, res) => {
   try {
     const { question, lang = 'en' } = req.body;
 
@@ -623,7 +717,7 @@ function pcmToWavBuffer(pcmBuffer: Buffer, sampleRate = 24000, numChannels = 1, 
   return buffer;
 }
 
-app.post('/api/audio/tts', async (req, res) => {
+app.post('/api/audio/tts', requireAuth, async (req, res) => {
   try {
     const { text, lang = 'en', voice = 'Kore' } = req.body;
     if (!text || typeof text !== 'string') {

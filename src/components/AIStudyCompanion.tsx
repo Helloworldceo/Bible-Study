@@ -3,17 +3,21 @@ import {
   Bot, Sparkles, Send, Copy, Check, BookOpen, 
   HelpCircle, MessageSquare, Flame, BookHeart
 } from 'lucide-react';
-import { Language } from '../types';
+import { Language, UserProfile } from '../types';
 import { useTranslation } from '../utils/translations';
 
 interface AIStudyCompanionProps {
   lang: Language;
+  user: UserProfile | null;
+  onOpenAuth: () => void;
   onSaveToJournal: (title: string, content: string) => void;
   onOpenPassageInBible: (bookId: string, chapter: number) => void;
 }
 
 export const AIStudyCompanion: React.FC<AIStudyCompanionProps> = ({
   lang,
+  user,
+  onOpenAuth,
   onSaveToJournal,
   onOpenPassageInBible,
 }) => {
@@ -58,6 +62,10 @@ export const AIStudyCompanion: React.FC<AIStudyCompanionProps> = ({
   const handleSend = async (queryText?: string) => {
     const textToSend = queryText || question;
     if (!textToSend.trim() || isLoading) return;
+    if (!user) {
+      onOpenAuth();
+      return;
+    }
 
     const userMsg = {
       role: 'user' as const,
@@ -70,11 +78,27 @@ export const AIStudyCompanion: React.FC<AIStudyCompanionProps> = ({
     setIsLoading(true);
 
     try {
+      const token = localStorage.getItem('berean_auth_token_v1');
       const res = await fetch('/api/gemini/study-qa', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ question: textToSend, lang })
       });
+      if (res.status === 401) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'assistant',
+            text: lang === 'am' ? 'ይህን ባህሪ ለመጠቀም እባክዎ ይግቡ።' : 'Please sign in to keep using the Study Companion.',
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          }
+        ]);
+        onOpenAuth();
+        return;
+      }
       const data = await res.json();
 
       const assistantMsg = {
@@ -209,6 +233,15 @@ export const AIStudyCompanion: React.FC<AIStudyCompanionProps> = ({
         )}
       </div>
 
+      {!user && (
+        <button
+          onClick={onOpenAuth}
+          className="w-full p-4 rounded-2xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-200 text-xs sm:text-sm font-medium text-center hover:bg-amber-100 dark:hover:bg-amber-950/50 transition-colors"
+        >
+          {lang === 'am' ? 'ይህን ባህሪ ለመጠቀም ነጻ መለያ ይክፈቱ ወይም ይግቡ →' : 'Create a free account or sign in to ask the Study Companion a question →'}
+        </button>
+      )}
+
       {/* Query Input Box */}
       <form
         onSubmit={(e) => {
@@ -221,8 +254,9 @@ export const AIStudyCompanion: React.FC<AIStudyCompanionProps> = ({
           type="text"
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
-          placeholder={lang === 'am' ? 'የመጽሐፍ ቅዱስ ጥያቄዎን እዚህ ይጠይቁ...' : 'Ask any biblical, theological, or language question...'}
-          className="flex-1 px-4 py-3 rounded-2xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 text-xs sm:text-sm focus:ring-2 focus:ring-amber-500 outline-none shadow-sm"
+          disabled={!user}
+          placeholder={!user ? (lang === 'am' ? 'ለመቀጠል መጀመሪያ ይግቡ...' : 'Sign in to ask a question...') : (lang === 'am' ? 'የመጽሐፍ ቅዱስ ጥያቄዎን እዚህ ይጠይቁ...' : 'Ask any biblical, theological, or language question...')}
+          className="flex-1 px-4 py-3 rounded-2xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 text-xs sm:text-sm focus:ring-2 focus:ring-amber-500 outline-none shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
         />
         <button
           type="submit"
