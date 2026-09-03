@@ -1,6 +1,9 @@
 // Bump this when you want to force everyone's cached shell to be dropped
 // on their next visit (e.g. after a breaking change to how assets load).
-const CACHE_NAME = 'berean-shell-v1';
+// v2: earlier versions also cached cross-origin requests (Google Sign-In's
+// own script included) as opaque responses -- this drops any of those a
+// returning visitor's browser is still holding onto.
+const CACHE_NAME = 'berean-shell-v2';
 
 self.addEventListener('install', () => {
   self.skipWaiting();
@@ -18,9 +21,18 @@ self.addEventListener('activate', (event) => {
 // the latest build, and an offline visit gets whatever was last cached.
 // /api/* is never cached: auth, sync, AI, and Discord calls must always be
 // live, never a stale response replayed while offline.
+//
+// Same-origin only: this used to also intercept cross-origin requests --
+// Google's own Sign-In script, Google Fonts, etc. Those come back as
+// "opaque" responses (status 0, unreadable) when fetched from a service
+// worker, and caching-then-replaying one of those can hand back a stale or
+// broken copy of a third party's own script on a later visit even while
+// their live version has moved on -- which is exactly the kind of thing
+// that made Google Sign-In fail intermittently. Third-party requests now
+// pass through untouched, same as if this service worker didn't exist.
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
-  if (event.request.method !== 'GET' || url.pathname.startsWith('/api/')) {
+  if (event.request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/')) {
     return;
   }
 
